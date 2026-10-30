@@ -1,0 +1,91 @@
+:root {
+  --primary: #0052ff;
+  --primary-hover: #0045d8;
+  --bg-dark: #0a0e17;
+  --card-dark: #121826;
+  --border-dark: #1f293d;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --success: #10b981;
+  --danger: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+code, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Glassmorphism and phone frame styling */
+.phone-mockup {
+  border-radius: 40px;
+  background: #0f172a;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 10px #1e293b, 0 0 0 12px #334155;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.phone-mockup:hover {
+  box-shadow: 0 30px 60px -12px rgba(0, 82, 255, 0.2), 0 0 0 10px #1e293b, 0 0 0 12px #3b82f6;
+}
+
+.phone-notch {
+  width: 140px;
+  height: 24px;
+  background: #1e293b;
+  margin: 0 auto;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+  position: relative;
+  z-index: 20;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #0052ff 0%, #003ebd 100%);
+  color: white;
+  font-weight: 600;
+  border-radius: 12px;
+  padding: 12px 20px;
+  transition: all 0.2s;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -4px rgba(0, 82, 255, 0.5);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}

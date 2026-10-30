@@ -1,0 +1,2 @@
+{ "name": "tappay-e2e", "private": true, "scripts": { "test": "node build.js && (npx hardhat node >/dev/null 2>&1 & echo $! > .pid; sleep 8; npx tsx e2e.ts; r=$?; kill $(cat .pid); exit $r)" },
+  "dependencies": { "@openzeppelin/contracts": "^5", "hardhat": "^2", "solc": "0.8.24", "tsx": "^4", "viem": "^2" } }

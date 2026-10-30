@@ -1,0 +1,2 @@
+{ "expo": { "name": "BasePOS", "slug": "base-pos", "android": { "package": "dev.basepos.app", "permissions": ["NFC", "CAMERA"] },
+  "plugins": ["expo-secure-store", "expo-camera", "react-native-nfc-manager"] } }
