@@ -20,7 +20,8 @@ import { formatINR, formatDateTime } from '../utils/formatters';
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
   onClose: () => void;
-  onRefund: (transactionId: string) => void;
+  /** Optional: only rendered when a real refund handler exists. */
+  onRefund?: (transactionId: string) => void;
 }
 
 export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
@@ -30,7 +31,6 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isRefunding, setIsRefunding] = useState(false);
-  const [refundSuccess, setRefundSuccess] = useState(false);
 
   if (!transaction) return null;
 
@@ -41,13 +41,37 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   };
 
   const handleRefundClick = () => {
+    if (!onRefund) return;
     setIsRefunding(true);
-    setTimeout(() => {
-      onRefund(transaction.id);
-      setIsRefunding(false);
-      setRefundSuccess(true);
-      setTimeout(() => setRefundSuccess(false), 3000);
-    }, 600);
+    setIsRefunding(false);
+    onRefund(transaction.id);
+  };
+
+  /** Plain-text receipt built from the row itself — no claim of an emailed GST invoice. */
+  const downloadReceipt = () => {
+    const lines = [
+      'PayFlux payment receipt (testnet)',
+      `Transaction: ${transaction.id}`,
+      `Reference: ${transaction.referenceId}`,
+      `Status: ${transaction.status}`,
+      `Amount: ${formatINR(transaction.amount)}`,
+      `Method: ${transaction.paymentMethod}${transaction.paymentSubtype ? ` (${transaction.paymentSubtype})` : ''}`,
+      `Customer: ${transaction.customer.name} <${transaction.customer.email || 'no email'}>`,
+      `Created: ${transaction.createdAt}`,
+      `Network: Base Sepolia (84532)`,
+      ...(transaction.txHash ? [`Transaction hash: ${transaction.txHash}`] : []),
+      '',
+      'This receipt covers an on-chain testnet settlement. It is not a tax invoice.',
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${transaction.id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const getStatusBadge = (status: Transaction['status']) => {
@@ -260,9 +284,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
         {/* Footer Actions */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 bg-neutral-50 border-t border-neutral-100">
           <button
-            onClick={() => {
-              alert(`Official GST Receipt for ${transaction.id} sent to ${transaction.customer.email}`);
-            }}
+            onClick={downloadReceipt}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-neutral-700 hover:text-neutral-900 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
@@ -270,7 +292,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
           </button>
 
           <div className="flex items-center gap-2">
-            {transaction.status === 'Successful' && (
+            {transaction.status === 'Successful' && onRefund && (
               <button
                 onClick={handleRefundClick}
                 disabled={isRefunding}

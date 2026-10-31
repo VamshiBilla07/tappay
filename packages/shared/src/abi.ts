@@ -5,6 +5,9 @@ export const settlementAbi = [
   { type: "function", name: "pay", stateMutability: "nonpayable", inputs: [reqTuple, { name: "sig", type: "bytes" }], outputs: [] },
   { type: "function", name: "payWithEth", stateMutability: "payable", inputs: [reqTuple, { name: "sig", type: "bytes" }], outputs: [] },
   { type: "function", name: "nonceUsed", stateMutability: "view", inputs: [{ type: "address" }, { type: "bytes32" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "usdc", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+  { type: "function", name: "weth", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+  { type: "function", name: "poolFee", stateMutability: "view", inputs: [], outputs: [{ type: "uint24" }] },
   { type: "event", name: "PaymentSettled", inputs: [
     { name: "merchant", type: "address", indexed: true }, { name: "nonce", type: "bytes32", indexed: true },
     { name: "payer", type: "address", indexed: true }, { name: "usdcAmount", type: "uint256", indexed: false },

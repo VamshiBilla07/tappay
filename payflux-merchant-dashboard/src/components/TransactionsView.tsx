@@ -139,7 +139,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 Active & Historic Payment Links
               </h3>
               <p className="text-xs text-neutral-400">
-                Track whether customers have opened and completed their checkout sessions
+                Live records from the payment server — copy a link, reopen checkout, or cancel an unpaid request
               </p>
             </div>
 

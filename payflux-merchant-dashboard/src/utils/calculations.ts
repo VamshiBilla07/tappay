@@ -1,8 +1,9 @@
-import { Transaction, TransactionStatus, PaymentMethod } from '../types';
+import type { Transaction } from '../types';
 
 export interface DashboardSummary {
   availableBalance: number;
   todayRevenue: number;
+  yesterdayRevenue: number;
   todayRevenueGrowth: number;
   totalVolume: number;
   paymentsTodayCount: number;
@@ -13,44 +14,72 @@ export interface DashboardSummary {
   pendingCount: number;
 }
 
-export function calculateSummary(transactions: Transaction[]): DashboardSummary {
-  // Base numbers from prototype reference, enhanced dynamically by newly verified successful transactions
-  const newlyAdded = transactions.filter((t) => !t.id.startsWith('TX-08') && !t.id.startsWith('TX-10482'));
-  
-  // CRITICAL REQUIREMENT: Only Successful transactions increase revenue or settlement totals!
-  const newlyVerifiedSuccess = newlyAdded.filter((t) => t.status === 'Successful');
-  const newlyAddedVolume = newlyVerifiedSuccess.reduce((acc, t) => acc + t.amount, 0);
-  
-  // Pending or Created transactions should count toward in-flight orders, but NOT revenue
-  const pendingTransactions = transactions.filter(
-    (t) => t.status === 'Pending' || t.status === 'Processing' || t.status === 'Created'
-  );
+const UPI_METHODS = new Set(['UPI', 'Wallet', 'Digital Wallets', 'Cryptocurrency']);
 
-  const paymentsTodayCount = 173 + newlyVerifiedSuccess.length;
-  const paymentsTodayAmount = 42800 + newlyAddedVolume;
-  const todayRevenue = 8420.00 + (newlyAddedVolume > 0 ? newlyAddedVolume * 0.98 : 0);
-  const availableBalance = 48250.00 + (newlyAddedVolume > 0 ? newlyAddedVolume * 0.98 : 0);
+const sum = (rows: Transaction[], pick: (t: Transaction) => number = (t) => t.amount): number =>
+  rows.reduce((acc, t) => acc + pick(t), 0);
 
-  // Success rate across settled transactions (excluding in-flight pending/created)
-  const allSettled = transactions.filter((t) => 
-    t.status === 'Successful' || t.status === 'Failed' || t.status === 'Cancelled'
-  );
-  const totalCompleted = transactions.filter((t) => t.status === 'Successful').length;
-  const successRate = allSettled.length > 0 
-    ? Math.min(99.4, Math.max(90.0, (totalCompleted / allSettled.length) * 100)) 
-    : 96.4;
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+const startOfDay = (d: Date): number => {
+  const c = new Date(d);
+  c.setHours(0, 0, 0, 0);
+  return c.getTime();
+};
+
+/**
+ * Every figure comes from the transactions passed in. Pending/Created/Failed
+ * rows never contribute to revenue or balance. `walletBalance` is the live
+ * on-chain USDC balance (in INR) when available.
+ */
+export function calculateSummary(transactions: Transaction[], walletBalance?: number): DashboardSummary {
+  const successful = transactions.filter((t) => t.status === 'Successful');
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const yesterday = new Date(todayStart);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStart = yesterday.getTime();
+
+  const today = successful.filter((t) => {
+    const at = new Date(t.createdAt).getTime();
+    return at >= todayStart;
+  });
+  const priorDay = successful.filter((t) => {
+    const at = new Date(t.createdAt).getTime();
+    return at >= yesterdayStart && at < todayStart;
+  });
+
+  const todayRevenue = round2(sum(today));
+  const yesterdayRevenue = round2(sum(priorDay));
+  const todayRevenueGrowth = yesterdayRevenue > 0
+    ? round2(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100)
+    : 0;
+
+  const totalVolume = round2(sum(successful));
+  const settled = transactions.filter((t) =>
+    t.status === 'Successful' || t.status === 'Failed' || t.status === 'Cancelled' || t.status === 'Refunded');
+  const successRate = settled.length > 0
+    ? round2((successful.length / settled.length) * 100)
+    : 100;
+
+  const from30 = now.getTime() - 30 * 86_400_000;
+  const last30DaysRevenue = round2(sum(successful.filter((t) => +new Date(t.createdAt) >= from30)));
+  const upiVolume = sum(successful.filter((t) => UPI_METHODS.has(t.paymentMethod)));
 
   return {
-    availableBalance: Math.round(availableBalance * 100) / 100,
-    todayRevenue: Math.round(todayRevenue * 100) / 100,
-    todayRevenueGrowth: 12.8,
-    totalVolume: Math.round((136580.00 + newlyAddedVolume) * 100) / 100,
-    paymentsTodayCount,
-    paymentsTodayAmount,
-    successRate: Math.round(successRate * 10) / 10,
-    last30DaysRevenue: Math.round((136580.00 + newlyAddedVolume) * 100) / 100,
-    upiSharePercent: 67,
-    pendingCount: pendingTransactions.length,
+    availableBalance: round2(walletBalance ?? sum(successful, (t) => t.netAmount)),
+    todayRevenue,
+    yesterdayRevenue,
+    todayRevenueGrowth,
+    totalVolume,
+    paymentsTodayCount: today.length,
+    paymentsTodayAmount: todayRevenue,
+    successRate,
+    last30DaysRevenue,
+    upiSharePercent: totalVolume > 0 ? round2((upiVolume / totalVolume) * 100) : 0,
+    pendingCount: transactions.filter(
+      (t) => t.status === 'Pending' || t.status === 'Processing' || t.status === 'Created',
+    ).length,
   };
 }
 
@@ -58,10 +87,9 @@ export function filterTransactions(
   transactions: Transaction[],
   query: string,
   statusFilter: string,
-  methodFilter: string
+  methodFilter: string,
 ): Transaction[] {
   return transactions.filter((t) => {
-    // Search query matches id, customer name, email, or handle
     const q = query.trim().toLowerCase();
     const matchesQuery = !q ||
       t.id.toLowerCase().includes(q) ||
@@ -72,10 +100,7 @@ export function filterTransactions(
       (t.upiRefNo && t.upiRefNo.toLowerCase().includes(q)) ||
       (t.txHash && t.txHash.toLowerCase().includes(q));
 
-    // Status filter
     const matchesStatus = statusFilter === 'All' || t.status === statusFilter;
-
-    // Method filter
     const matchesMethod = methodFilter === 'All' || t.paymentMethod === methodFilter;
 
     return matchesQuery && matchesStatus && matchesMethod;

@@ -26,6 +26,8 @@ interface RecentTransactionsTableProps {
   onSelectTransaction: (txn: Transaction) => void;
   onViewAll?: () => void;
   isDetailedView?: boolean;
+  title?: string;
+  subtitle?: string;
 }
 
 export const RecentTransactionsTable: React.FC<RecentTransactionsTableProps> = ({
@@ -33,6 +35,8 @@ export const RecentTransactionsTable: React.FC<RecentTransactionsTableProps> = (
   onSelectTransaction,
   onViewAll,
   isDetailedView = false,
+  title = 'Recent Transactions',
+  subtitle,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
@@ -191,37 +195,49 @@ export const RecentTransactionsTable: React.FC<RecentTransactionsTableProps> = (
   const displayList = isDetailedView ? filtered : filtered.slice(0, 7);
 
   const exportCSV = () => {
-    const headers = ['Transaction ID', 'Customer Name', 'Email', 'Payment Method', 'Amount (INR)', 'Status', 'Date'];
+    // Prefix formula-looking cells so a crafted customer name can't run in Excel/Sheets.
+    const cell = (value: string | number) => {
+      const raw = String(value ?? '');
+      const guarded = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+      return `"${guarded.replace(/"/g, '""')}"`;
+    };
+    const headers = ['Transaction ID', 'Customer Name', 'Email', 'Payment Method', 'Amount (INR)', 'Status', 'Date', 'Tx Hash'];
     const rows = filtered.map((t) => [
       t.id,
-      `"${t.customer.name}"`,
-      `"${t.customer.email}"`,
+      t.customer.name,
+      t.customer.email,
       t.paymentMethod,
       t.amount,
       t.status,
-      `"${t.createdAt}"`,
-    ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+      t.createdAt,
+      t.txHash ?? '',
+    ].map(cell));
+    const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `PayFlux_Transactions_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="w-full bg-white rounded-[28px] border border-neutral-100 shadow-sm p-4 sm:p-6 my-2 overflow-hidden">
       {/* Top Header Row matching screenshot */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg sm:text-xl font-extrabold text-neutral-900 tracking-tight">
-            Recent Transactions
-          </h2>
-          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600">
-            {filtered.length} total
-          </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg sm:text-xl font-extrabold text-neutral-900 tracking-tight">
+              {title}
+            </h2>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600">
+              {filtered.length} total
+            </span>
+          </div>
+          {subtitle && <p className="text-[11px] text-neutral-400 mt-0.5">{subtitle}</p>}
         </div>
 
         <div className="flex items-center gap-2">
@@ -255,7 +271,7 @@ export const RecentTransactionsTable: React.FC<RecentTransactionsTableProps> = (
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by ID, customer name, email, or UPI..."
+            placeholder="Search by ID, customer, email, or tx hash..."
             className="w-full bg-neutral-50 hover:bg-neutral-100/60 focus:bg-white text-xs font-medium text-neutral-900 placeholder:text-neutral-400 pl-9 pr-4 py-2 rounded-xl border border-neutral-200/80 focus:border-neutral-900 focus:outline-none transition-all"
           />
         </div>

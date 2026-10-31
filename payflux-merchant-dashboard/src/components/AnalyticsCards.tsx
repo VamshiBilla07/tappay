@@ -86,7 +86,7 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
         <div className="flex items-start justify-between relative z-10">
           <div>
             <div className="text-3xl font-extrabold tracking-tight">
-              +{paymentsTodayCount}
+              {paymentsTodayCount}
             </div>
             <div className="text-xs font-medium text-white/85 mt-0.5">
               Payments today
@@ -113,8 +113,8 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
               <div className="w-9 h-1.5 bg-white/60 rounded-full" />
             </div>
             <div className="flex items-center justify-between text-[8px] font-bold text-white/90">
-              <span>UPI</span>
-              <span>₹✓</span>
+              <span>USDC</span>
+              <span>Base</span>
             </div>
           </div>
         </div>
@@ -127,7 +127,7 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
           >
             <div className="text-left">
               <div className="text-xs font-extrabold tracking-tight">
-                ₹{(paymentsTodayAmount / 1000).toFixed(1)}K
+                {formatINR(paymentsTodayAmount, false)}
               </div>
               <div className="text-[10px] text-white/80">
                 Processed today
@@ -155,7 +155,7 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
             {upiSharePercent}%
           </div>
           <div className="text-xs font-medium text-white/85 mt-1">
-            UPI share volume
+            Direct-USDC share
           </div>
           <div className="text-[11px] text-white/70 mt-0.5">
             Success rate: <strong className="text-white font-bold">{successRate}%</strong>
@@ -226,6 +226,13 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
 
         {/* Rows */}
         <div className="space-y-3.5 flex-1">
+          {recentPayments.length === 0 && (
+            <div className="h-full min-h-24 flex items-center justify-center text-center px-3">
+              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                No settled payments yet. Create a payment link and pay it from a second wallet.
+              </p>
+            </div>
+          )}
           {recentPayments.slice(0, 3).map((item) => (
             <div
               key={item.id}
@@ -233,16 +240,22 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
               className="flex items-center justify-between text-xs p-1.5 rounded-xl hover:bg-neutral-50 transition-colors cursor-pointer group"
             >
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <img
-                  src={item.avatar}
-                  alt={item.customerName}
-                  className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-neutral-100"
-                />
+                {item.avatar ? (
+                  <img
+                    src={item.avatar}
+                    alt={item.customerName}
+                    className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-neutral-100"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-indigo-50 text-indigo-700 shrink-0 ring-1 ring-indigo-100 flex items-center justify-center text-[10px] font-extrabold">
+                    {item.customerName.replace(/^0x/, '').slice(0, 2).toUpperCase() || 'GH'}
+                  </div>
+                )}
                 <div className="min-w-0">
-                  <div className="font-bold text-neutral-900 whitespace-nowrap">
+                  <div className="font-bold text-neutral-900 whitespace-nowrap truncate">
                     {item.customerName}
                   </div>
-                  <div className="text-[11px] text-neutral-400 font-mono">
+                  <div className="text-[11px] text-neutral-400 font-mono truncate">
                     {item.customerHandle}
                   </div>
                 </div>
@@ -250,9 +263,6 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
 
               <div className="flex items-center gap-2 shrink-0">
                 <div className="text-right whitespace-nowrap">
-                  <span className="text-[10px] text-neutral-400 mr-1.5 font-medium">
-                    {item.feePercent}%
-                  </span>
                   <span className="font-bold text-neutral-900">
                     {formatINR(item.amount, false)}
                   </span>
@@ -268,7 +278,7 @@ export const AnalyticsCards: React.FC<AnalyticsCardsProps> = ({
             onClick={onViewAllPayments}
             className="text-[11px] font-semibold text-neutral-500 hover:text-neutral-900 transition-colors cursor-pointer"
           >
-            View all 173 payments today →
+            View all payments →
           </button>
         </div>
       </div>
