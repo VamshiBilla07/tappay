@@ -20,6 +20,7 @@ import {
   apiJson, clearConfigCache, getConfig, shortAddr, usdcToInr, type AppConfig,
 } from './lib/config';
 import type { LinkStatus, PaymentLinkView } from './lib/paylink';
+import { demoTxnFromLink, listDemoLinks } from './lib/demo';
 import {
   authorizedAccount, connectInjected, isUserRejection, publicClient, walletClientFor, watchAccounts,
 } from './lib/wallet';
@@ -34,7 +35,8 @@ import { cancelMessage, settlementMessage } from './lib/messages';
 
 const pc = publicClient();
 const QUERY = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-const DEMO = QUERY.has('demo');
+/** Sample data is the default showcase; `?demo=0` (or the header toggle) switches to live reads. */
+const DEMO = QUERY.get('demo') !== '0';
 const PATH = typeof window !== 'undefined' ? window.location.pathname : '/';
 const TOTAL_DAYS: Record<DateRangeOption, number> = {
   today: 1,
@@ -111,6 +113,8 @@ function Dashboard() {
   const [sales, setSales] = useState<Sale[] | null>(DEMO ? [] : null);
   const [balance, setBalance] = useState<bigint | null>(null);
   const [links, setLinks] = useState<PaymentLinkView[]>([]);
+  /** Demo-only: links created in this browser and payments simulated against them. */
+  const [demoLinks, setDemoLinks] = useState<PaymentLinkView[]>(() => (DEMO ? listDemoLinks() : []));
   const [chainError, setChainError] = useState<string>();
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [createLinkOpen, setCreateLinkOpen] = useState(false);
@@ -196,6 +200,18 @@ function Dashboard() {
     return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
   }, [loadLinks, address]);
 
+  /* demo links: pick up a payment simulated in the checkout tab */
+  useEffect(() => {
+    if (!DEMO) return;
+    const refresh = () => setDemoLinks(listDemoLinks());
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
   const rate = config?.inrPerUsdc ?? 85;
   const balanceInr = balance === null ? undefined : usdcToInr(balance, rate);
 
@@ -216,13 +232,23 @@ function Dashboard() {
     }));
   }, []);
 
-  const transactions = useMemo(
-    () => buildTransactions(DEMO ? [] : sales ?? [], DEMO ? [] : links, rate, DEMO ? demoTransactions : null),
-    [DEMO, sales, links, rate, demoTransactions],
+  /** Paid demo links are the single source of the simulated money. */
+  const paidDemoTxns = useMemo(
+    () => demoLinks.filter((l) => l.status === 'paid').map(demoTxnFromLink),
+    [demoLinks],
+  );
+  const transactions = useMemo(() => {
+    if (!DEMO) return buildTransactions(sales ?? [], links, rate, null);
+    // Newest simulated demo payment first, then the dated sample history.
+    return [...paidDemoTxns, ...demoTransactions];
+  }, [DEMO, sales, links, rate, demoTransactions, paidDemoTxns]);
+  const demoVolume = useMemo(
+    () => Math.round(paidDemoTxns.reduce((a, t) => a + t.amount, 0) * 100) / 100,
+    [paidDemoTxns],
   );
   const summary = useMemo(
-    () => calculateSummary(transactions, DEMO ? 48_250 : balanceInr),
-    [transactions, DEMO, balanceInr],
+    () => calculateSummary(transactions, DEMO ? 48_250 + demoVolume : balanceInr),
+    [transactions, DEMO, balanceInr, demoVolume],
   );
   const volumeBars = useMemo(
     () => DEMO ? VOLUME_BARS : deriveVolumeBars(transactions, TOTAL_DAYS[dateRange]),
@@ -232,17 +258,19 @@ function Dashboard() {
     () => DEMO ? RECENT_PAYMENTS : deriveRecentPayments(transactions),
     [DEMO, transactions],
   );
-  const paymentLinks = useMemo(() => (DEMO ? [] : links.map(toLegacyLink)), [DEMO, links]);
+  const paymentLinks = useMemo(
+    () => (DEMO ? demoLinks.map(toLegacyLink) : links.map(toLegacyLink)),
+    [DEMO, demoLinks, links],
+  );
   const customers = useMemo(() => deriveCustomers(transactions), [transactions]);
   const loading = !DEMO && !!address && sales === null;
 
+  /** Opens the method chooser. Demo mode needs no wallet, deploy, or chain. */
   const openCreateLink = () => {
-    if (DEMO) {
-      setChainError('This is sample mode. Switch to live to sign a real request with MetaMask.');
-      return;
+    if (!DEMO) {
+      if (!address) { void connect(); return; }
+      if (!config?.deployed) { setActiveTab('Settings'); return; }
     }
-    if (!address) { void connect(); return; }
-    if (!config?.deployed) { setActiveTab('Settings'); return; }
     setCreateLinkOpen(true);
   };
 
@@ -297,6 +325,12 @@ function Dashboard() {
 
   const onCreated = (link: PaymentLinkView) => {
     setLinks((prev) => [link, ...prev.filter((l) => l.id !== link.id)]);
+    if (DEMO) setDemoLinks((prev) => [link, ...prev.filter((l) => l.id !== link.id)]);
+  };
+
+  /** A simulated demo payment: surface it everywhere the dashboard reads transactions. */
+  const onDemoPaid = (link: PaymentLinkView) => {
+    setDemoLinks((prev) => [link, ...prev.filter((l) => l.id !== link.id)]);
   };
 
   const onSelectPayment = (payment: { customerName: string }) => {
@@ -312,7 +346,7 @@ function Dashboard() {
           setActiveTab={setActiveTab}
           isTestMode={DEMO}
           setIsTestMode={(demo) => {
-            window.location.href = demo ? `${PATH}?demo=1` : PATH;
+            window.location.href = `${PATH}?demo=${demo ? '1' : '0'}`;
           }}
           onOpenCreateLink={openCreateLink}
           unreadCount={summary.pendingCount}
@@ -431,9 +465,11 @@ function Dashboard() {
         config={config}
         merchant={address}
         defaultEns={ensName}
+        demo={DEMO}
         onEnsureWallet={connect}
         onCreated={onCreated}
         onOpenCheckout={openCheckout}
+        onDemoPaid={onDemoPaid}
       />
     </div>
   );

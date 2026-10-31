@@ -18,6 +18,8 @@ import {
 } from '../lib/wallet';
 import { ALL_METHODS, RAIL_COPY, METHOD_SUBTYPE, railFor, type Rail } from '../lib/methods';
 import { metamaskLink } from '../lib/links';
+import { getDemoLink, patchDemoLink } from '../lib/demo';
+import { FlaskConical } from 'lucide-react';
 import type { PaymentMethod } from '../types';
 
 const pc = publicClient();
@@ -44,12 +46,21 @@ const METHOD_ICON: Record<PaymentMethod, React.ReactNode> = {
 };
 
 const fmtLeft = (seconds: number) => {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s < 10 ? '0' : ''}${s}`;
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = s < 10 ? `0${s}` : `${s}`;
+  return h > 0 ? `${h}:${m < 10 ? `0${m}` : m}:${ss}` : `${m}:${ss}`;
 };
 
 export default function PayLinkPage({ linkId }: { linkId: string }) {
+  const demo = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('demo') === '1';
+  return demo ? <DemoCheckout linkId={linkId} /> : <LiveCheckout linkId={linkId} />;
+}
+
+function LiveCheckout({ linkId }: { linkId: string }) {
   const [link, setLink] = useState<PaymentLinkView | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loadError, setLoadError] = useState<string>();
@@ -277,7 +288,7 @@ export default function PayLinkPage({ linkId }: { linkId: string }) {
           <div className="text-right shrink-0">
             <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Amount</div>
             <div className="text-2xl sm:text-3xl font-extrabold text-neutral-900 tabular-nums">{formatINR(link.inr)}</div>
-            <div className="text-[11px] font-semibold text-neutral-500 tabular-nums">≈ {fmtUsdc(link.usdc)} USDC</div>
+            <div className="text-[11px] font-semibold text-neutral-500 tabular-nums">≈ {Number(link.usdc).toFixed(2)} USDC</div>
           </div>
         </div>
 
@@ -436,7 +447,159 @@ export default function PayLinkPage({ linkId }: { linkId: string }) {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+/**
+ * Demo checkout: renders from localStorage, never asks for a wallet and never
+ * touches the chain. Clearly labelled so it can't be mistaken for a real charge.
+ */
+function DemoCheckout({ linkId }: { linkId: string }) {
+  const [link, setLink] = useState<PaymentLinkView | null>(() => getDemoLink(linkId));
+  const [method, setMethod] = useState<PaymentMethod>('UPI');
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const [paid, setPaid] = useState(() => getDemoLink(linkId)?.status === 'paid');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (link?.methods[0]) setMethod(link.methods[0]);
+  }, [link]);
+
+  if (!link) {
+    return (
+      <Shell demo>
+        <div className="p-6 text-center space-y-3">
+          <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
+          <h1 className="text-lg font-extrabold text-neutral-900">Demo link not found</h1>
+          <p className="text-sm text-neutral-500">
+            Demo links live in this browser's storage. Create one from the dashboard on this device.
+          </p>
+          <a href="/" className="inline-block mt-2 text-xs font-bold text-indigo-600 hover:underline">Back to PayFlux</a>
+        </div>
+      </Shell>
+    );
+  }
+
+  const secondsLeft = Math.max(0, link.expiresAt - now);
+  const expired = secondsLeft <= 0;
+
+  const pay = () => {
+    setBusy(true);
+    window.setTimeout(() => {
+      const updated = patchDemoLink(link.id, { status: 'paid' }) ?? link;
+      setLink(updated);
+      setPaid(true);
+      setBusy(false);
+    }, 700);
+  };
+
+  if (paid) {
+    return (
+      <Shell demo>
+        <div className="p-6 sm:p-8 text-center space-y-4">
+          <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-8 h-8" />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold text-neutral-900">Demo payment complete</h1>
+            <p className="text-sm text-neutral-500 mt-1">
+              {formatINR(link.inr)} · {method}
+            </p>
+          </div>
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3 leading-relaxed">
+            This was a demonstration. No signature was checked, no USDC moved and no contract was called.
+          </p>
+          <a href="/" className="inline-block text-xs font-bold text-indigo-600 hover:underline">Back to the dashboard</a>
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell demo>
+      <div className="p-5 sm:p-7 space-y-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Paying</div>
+            <div className="text-sm font-extrabold text-neutral-900 truncate">PayFlux Demo Store</div>
+            <div className="text-[11px] text-neutral-400">Sample merchant</div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Amount</div>
+            <div className="text-2xl sm:text-3xl font-extrabold text-neutral-900 tabular-nums">{formatINR(link.inr)}</div>
+            <div className="text-[11px] font-semibold text-neutral-500 tabular-nums">≈ {Number(link.usdc).toFixed(2)} USDC</div>
+          </div>
+        </div>
+
+        {link.description && (
+          <div className="bg-neutral-50 border border-neutral-100 rounded-2xl p-3 text-xs text-neutral-700">
+            {link.description}
+          </div>
+        )}
+
+        <div className="flex items-start gap-2 rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+          <FlaskConical className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            Demo mode. Nothing is signed and no funds move — choosing a method and paying only records a sample
+            transaction in this browser.
+          </span>
+        </div>
+
+        <div className={`flex items-center justify-between gap-2 rounded-2xl px-3.5 py-2.5 text-xs font-semibold border ${
+          expired ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-indigo-50/70 border-indigo-100 text-indigo-800'
+        }`}>
+          <span className="inline-flex items-center gap-1.5">
+            <Clock className="w-4 h-4" />
+            {expired ? 'This demo request expired. Create a fresh one.' : `Expires in ${fmtLeft(secondsLeft)}`}
+          </span>
+          <span className="text-[10px] uppercase tracking-wide opacity-70">Demo</span>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Payment method</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {link.methods.map((m) => {
+              const active = method === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMethod(m)}
+                  disabled={busy}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs font-bold transition-colors cursor-pointer disabled:opacity-60 ${
+                    active
+                      ? 'border-neutral-900 bg-neutral-900 text-white'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                  }`}
+                >
+                  <span className={active ? 'text-indigo-300' : 'text-neutral-400'}>{METHOD_ICON[m]}</span>
+                  <span className="leading-tight">{m}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={pay}
+          disabled={busy || expired}
+          className="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white text-sm font-extrabold flex items-center justify-center gap-2 cursor-pointer"
+        >
+          {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Recording demo payment…</> : `Pay ${formatINR(link.inr)} (demo)`}
+        </button>
+
+        <p className="text-[11px] text-neutral-400 text-center">
+          No wallet connection is needed. The real checkout asks MetaMask to sign a testnet USDC payment.
+        </p>
+      </div>
+    </Shell>
+  );
+}
+
+function Shell({ children, demo = false }: { children: React.ReactNode; demo?: boolean }) {
   return (
     <div className="min-h-screen bg-[#edeae4] text-neutral-900 font-sans p-3 sm:p-6 flex justify-center items-start">
       <main className="w-full max-w-lg bg-white rounded-[28px] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.12)] border border-black/5 overflow-hidden my-auto">
@@ -456,7 +619,9 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
         {children}
         <div className="px-5 sm:px-7 py-3 border-t border-neutral-100 text-center text-[10px] text-neutral-400">
-          USDC is settled by the PaymentSettlement contract · this demo runs on testnet only
+          {demo
+            ? 'Demonstration only · no signature, no chain call, no funds'
+            : 'USDC is settled by the PaymentSettlement contract · testnet only'}
         </div>
       </main>
     </div>

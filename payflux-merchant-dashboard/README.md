@@ -17,15 +17,31 @@ npm run dev               # http://localhost:3000
 
 ## First run
 
-1. Open <http://localhost:3000>, connect MetaMask, switch it to **Base Sepolia**.
+The app opens in **sample-data mode**, which needs no wallet and no deployed contract. That
+is the showcase path:
+
+1. Open <http://localhost:3000>.
+2. Tap **Create Link**. A method chooser opens — UPI, cards, net banking, wallets, NFC, crypto.
+3. Tap a method. The chooser closes and the payment popup opens with the **QR code**, the
+   amount, a live countdown, and the shareable link.
+4. Either **Simulate customer payment** in that panel, or open the link / scan the QR to
+   complete the demo checkout. Either way the payment lands on the dashboard, in
+   Transactions, Settlements and Customers.
+
+Demo links live in `localStorage`, so they survive a reload but not a different browser or
+device. Nothing is signed, no chain call is made, and the panels say so.
+
+`?demo=0` switches to live reads (or use the header toggle). The live path:
+
+1. Connect MetaMask and switch it to **Base Sepolia**.
 2. The header shows *"Testnet, not deployed"* until a settlement contract exists.
 3. Go to **Settings → Settlement contract → Deploy from this wallet**. This sends a
    contract-creation transaction (needs a little Base Sepolia ETH for gas), then registers
    the address with the server. The server re-reads the deployed contract's `usdc()`,
    `weth()` and `poolFee()` getters before trusting it, and records the deployer signature.
-4. Create a link (**Create Link**), copy or scan it, and open it in a second wallet.
+4. Create a link the same way — the chosen method is preselected on the checkout.
 
-Until step 3 the API refuses to create links on purpose — there is no sandbox contract to
+In live mode the API refuses to create links until step 3 — there is no sandbox contract to
 fall back to.
 
 ## What each payment method actually does
@@ -99,8 +115,8 @@ npm test         # node:test suite for the money math
 npx tsx scripts/api-smoke.ts   # HTTP lifecycle test against a stubbed contract
 ```
 
-`?demo=1` swaps the dashboard to labelled sample rows. It never touches the API or chain,
-and the banner says so.
+Sample-data mode is the default (`?demo=0` forces live). It never touches the API or the
+chain, and every banner says so.
 
 ## Limits
 
