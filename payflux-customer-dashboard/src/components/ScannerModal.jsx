@@ -347,7 +347,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
           {!support.supported ? (
             <div className="rounded-xl p-3 mt-4 text-left text-xs" style={{ background: "var(--ylbg)", color: "var(--yl)" }}>
               <div className="flex items-center gap-2 font-medium mb-1"><ShieldCheck size={15} /> NFC unavailable here</div>
-              {support.reason} Use the QR tab instead, or open this dashboard in Chrome on Android over HTTPS.
+              {support.reason} {support.hint}
             </div>
           ) : nfcState === "scanning" ? (
             <div className="rounded-xl p-4 mt-4" style={{ background: "var(--prbg)", color: "var(--pr)" }}>

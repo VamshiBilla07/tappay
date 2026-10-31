@@ -1,14 +1,22 @@
 export function nfcSupport() {
   if (typeof window === "undefined") {
-    return { supported: false, reason: "NFC needs a browser." };
+    return { supported: false, reason: "NFC needs a browser.", hint: "Open this dashboard on an Android phone." };
   }
   if (!window.isSecureContext) {
-    return { supported: false, reason: "Web NFC needs HTTPS (or localhost)." };
+    return {
+      supported: false,
+      reason: "Web NFC needs HTTPS (or localhost).",
+      hint: "Serve this dashboard over https:// in Chrome on Android to enable taps.",
+    };
   }
   if (!("NDEFReader" in window)) {
-    return { supported: false, reason: "Web NFC is only available in Chrome on Android." };
+    return {
+      supported: false,
+      reason: "Web NFC is only available in Chrome on Android.",
+      hint: "Use the QR tab instead.",
+    };
   }
-  return { supported: true, reason: "" };
+  return { supported: true, reason: "", hint: "" };
 }
 
 function decodeRecord(record) {
