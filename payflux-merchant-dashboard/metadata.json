@@ -1,0 +1,6 @@
+{
+  "name": "PayFlux Merchant Dashboard",
+  "description": "Modern INR-denominated fintech payment gateway merchant dashboard for monitoring transactions, real-time volume, revenue analytics, and settlements.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
