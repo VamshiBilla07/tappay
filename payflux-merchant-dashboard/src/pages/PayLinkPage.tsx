@@ -452,11 +452,14 @@ function LiveCheckout({ linkId }: { linkId: string }) {
  * touches the chain. Clearly labelled so it can't be mistaken for a real charge.
  */
 function DemoCheckout({ linkId }: { linkId: string }) {
-  const [link, setLink] = useState<PaymentLinkView | null>(() => getDemoLink(linkId));
+  const [localLink] = useState<PaymentLinkView | null>(() => getDemoLink(linkId));
+  const [link, setLink] = useState<PaymentLinkView | null>(localLink);
+  const [loading, setLoading] = useState(!localLink);
   const [method, setMethod] = useState<PaymentMethod>('UPI');
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  const [paid, setPaid] = useState(() => getDemoLink(linkId)?.status === 'paid');
+  const [paid, setPaid] = useState(() => localLink?.status === 'paid');
   const [busy, setBusy] = useState(false);
+  const [payError, setPayError] = useState<string>();
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
@@ -464,8 +467,37 @@ function DemoCheckout({ linkId }: { linkId: string }) {
   }, []);
 
   useEffect(() => {
+    if (localLink) return;
+    let cancelled = false;
+    apiJson<{ link: PaymentLinkView }>(`/api/links/${encodeURIComponent(linkId)}`)
+      .then((body) => {
+        if (cancelled) return;
+        setLink(body.link);
+        setPaid(body.link.status === 'paid');
+      })
+      .catch(() => {
+        /* shown as not found below */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [linkId, localLink]);
+
+  useEffect(() => {
     if (link?.methods[0]) setMethod(link.methods[0]);
   }, [link]);
+
+  if (loading) {
+    return (
+      <Shell demo>
+        <div className="p-10 text-center">
+          <Loader2 className="w-7 h-7 animate-spin text-indigo-600 mx-auto" />
+          <p className="text-xs text-neutral-500 mt-3">Loading demo request…</p>
+        </div>
+      </Shell>
+    );
+  }
 
   if (!link) {
     return (
@@ -474,7 +506,8 @@ function DemoCheckout({ linkId }: { linkId: string }) {
           <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
           <h1 className="text-lg font-extrabold text-neutral-900">Demo link not found</h1>
           <p className="text-sm text-neutral-500">
-            Demo links live in this browser's storage. Create one from the dashboard on this device.
+            This demo link is not on the server. Create a fresh one from the merchant dashboard so
+            both phones can resolve it.
           </p>
           <a href="/" className="inline-block mt-2 text-xs font-bold text-indigo-600 hover:underline">Back to PayFlux</a>
         </div>
@@ -486,12 +519,28 @@ function DemoCheckout({ linkId }: { linkId: string }) {
   const expired = secondsLeft <= 0;
 
   const pay = () => {
+    if (busy || expired) return;
     setBusy(true);
-    window.setTimeout(() => {
-      const updated = patchDemoLink(link.id, { status: 'paid' }) ?? link;
-      setLink(updated);
-      setPaid(true);
-      setBusy(false);
+    setPayError(undefined);
+    window.setTimeout(async () => {
+      try {
+        if (link.demo) {
+          const body = await apiJson<{ link: PaymentLinkView }>(
+            `/api/links/${encodeURIComponent(link.id)}/simulate`,
+            { method: 'POST', body: JSON.stringify({ method }) },
+          );
+          setLink(body.link);
+          patchDemoLink(link.id, { status: 'paid' });
+        } else {
+          const updated = patchDemoLink(link.id, { status: 'paid' }) ?? link;
+          setLink(updated);
+        }
+        setPaid(true);
+      } catch (e: any) {
+        setPayError(e?.message ?? 'Could not record the demo payment.');
+      } finally {
+        setBusy(false);
+      }
     }, 700);
   };
 
@@ -542,8 +591,8 @@ function DemoCheckout({ linkId }: { linkId: string }) {
         <div className="flex items-start gap-2 rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
           <FlaskConical className="w-4 h-4 shrink-0 mt-0.5" />
           <span>
-            Demo mode. Nothing is signed and no funds move — choosing a method and paying only records a sample
-            transaction in this browser.
+            Demo mode. Nothing is signed and no funds move — the payment is recorded on the demo
+            server and in this browser.
           </span>
         </div>
 
@@ -590,6 +639,8 @@ function DemoCheckout({ linkId }: { linkId: string }) {
         >
           {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Recording demo payment…</> : `Pay ${formatINR(link.inr)} (demo)`}
         </button>
+
+        {payError && <p className="text-[11px] text-rose-600 text-center">{payError}</p>}
 
         <p className="text-[11px] text-neutral-400 text-center">
           No wallet connection is needed. The real checkout asks MetaMask to sign a testnet USDC payment.

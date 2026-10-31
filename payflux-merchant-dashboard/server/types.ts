@@ -41,6 +41,8 @@ export interface LinkRecord {
   createdAt: number;
   expiresAt: number;
   status: LinkStatus;
+  /** Demo links are server-backed, unsigned, and settle only through /simulate. */
+  demo?: boolean;
   txHash?: Hex;
   payer?: Address;
   paidWithEth?: boolean;

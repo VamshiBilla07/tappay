@@ -10,7 +10,7 @@ import { USDC, domain, encode, randomNonce, types } from '@pos/shared';
 import { formatINR } from '../utils/formatters';
 import { apiJson, fmtUsdc, inrToUsdc, type AppConfig } from '../lib/config';
 import type { PaymentLinkView } from '../lib/paylink';
-import { createDemoLink, patchDemoLink } from '../lib/demo';
+import { createDemoLink, refreshDemoLink, simulateDemoLink } from '../lib/demo';
 import { walletClientFor } from '../lib/wallet';
 import { ALL_METHODS, isNfcSupported, railFor } from '../lib/methods';
 import type { PaymentMethod } from '../types';
@@ -157,6 +157,23 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
     return () => window.clearInterval(t);
   }, [isOpen, stage, paid]);
 
+  /* Demo: the customer pays on their own phone — poll the server so this panel flips to paid. */
+  const generatedId = generated?.id;
+  const generatedDemo = Boolean(generated?.demo);
+  useEffect(() => {
+    if (!isOpen || stage !== 'charge' || paid || !generatedId || !generatedDemo) return;
+    let stopped = false;
+    const check = async () => {
+      const fresh = await refreshDemoLink(generatedId);
+      if (stopped || !fresh || fresh.status !== 'paid') return;
+      setGenerated(fresh);
+      setPaid(true);
+      onDemoPaid(fresh);
+    };
+    const timer = window.setInterval(() => void check(), 2_000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [isOpen, stage, paid, generatedId, generatedDemo, onDemoPaid]);
+
   const usdcPreview = useMemo(() => {
     const n = parseFloat(amount);
     return Number.isFinite(n) && n > 0 ? n / (config?.inrPerUsdc || 85) : 0;
@@ -186,8 +203,8 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
     }
     try {
       const writer = new NDEF();
-      await writer.write({ records: [{ recordType: 'text', data: JSON.stringify(generated.request) }] });
-      setNfcMsg('NFC tag written. The customer phone can now read the request.');
+      await writer.write({ records: [{ recordType: 'url', data: generated.url }] });
+      setNfcMsg('NFC tag written with the checkout link. The customer can tap it to open this payment.');
     } catch (e: any) {
       setNfcMsg(e?.message ?? 'The NFC write failed.');
     }
@@ -209,7 +226,7 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
     setSelected(method);
 
     if (demo) {
-      const link = createDemoLink({
+      const link = await createDemoLink({
         inr: numAmount,
         rate: config?.inrPerUsdc || 85,
         description: description || `Payment for ${method}`,
@@ -290,11 +307,11 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
   };
 
   /** Demo only: mark the request paid and let the dashboard pick the row up. */
-  const simulatePayment = () => {
-    if (!generated) return;
-    const updated = patchDemoLink(generated.id, { status: 'paid' }) ?? generated;
-    setGenerated(updated);
+  const simulatePayment = async () => {
+    if (!generated || paid) return;
     setPaid(true);
+    const updated = (await simulateDemoLink(generated.id, selected ?? 'UPI')) ?? generated;
+    setGenerated(updated);
     onDemoPaid(updated);
   };
 
@@ -520,7 +537,7 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
                   </div>
                 </div>
                 <div className="p-3 bg-neutral-50 rounded-xl text-[11px] text-neutral-500">
-                  Demo settlement recorded on the dashboard — Transactions, Settlements and Customers now show it.
+                  Recorded on the demo dashboard — Transactions, Settlements and Customers now show it.
                 </div>
                 <div className="flex gap-2 pt-1">
                   <button
@@ -597,8 +614,8 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
                       <ExternalLink className="w-3.5 h-3.5" /> Open the customer checkout
                     </button>
                     <p className="text-[10px] text-neutral-400 text-center leading-relaxed">
-                      The QR and the link open the same demo checkout in this browser. Nothing is signed and no
-                      funds move — the sample payment is recorded locally.
+                      The QR and link work on a second phone while this demo server is reachable.
+                      Nothing is signed and no funds move.
                     </p>
                   </div>
                 ) : (
@@ -613,7 +630,7 @@ export const CreatePaymentLinkModal: React.FC<CreatePaymentLinkModalProps> = ({
                       <button
                         onClick={() => void writeNfc()}
                         className="w-full sm:w-auto py-3 px-4 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
-                        title="Write the signed request to an NFC tag"
+                        title="Write the checkout link to an NFC tag"
                       >
                         <Nfc className="w-4 h-4" /> Write NFC
                       </button>

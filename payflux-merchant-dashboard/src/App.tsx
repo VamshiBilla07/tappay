@@ -20,7 +20,7 @@ import {
   apiJson, clearConfigCache, getConfig, shortAddr, usdcToInr, type AppConfig,
 } from './lib/config';
 import type { LinkStatus, PaymentLinkView } from './lib/paylink';
-import { demoTxnFromLink, listDemoLinks } from './lib/demo';
+import { demoTxnFromLink, listDemoLinks, listServerDemoLinks, mergeDemoLinks } from './lib/demo';
 import {
   authorizedAccount, connectInjected, isUserRejection, publicClient, walletClientFor, watchAccounts,
 } from './lib/wallet';
@@ -200,13 +200,25 @@ function Dashboard() {
     return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
   }, [loadLinks, address]);
 
-  /* demo links: pick up a payment simulated in the checkout tab */
+  /* demo links: pick up a payment simulated in the checkout tab, on this or another phone */
   useEffect(() => {
     if (!DEMO) return;
     const refresh = () => setDemoLinks(listDemoLinks());
     window.addEventListener('focus', refresh);
     window.addEventListener('storage', refresh);
+
+    let stopped = false;
+    const poll = async () => {
+      const server = await listServerDemoLinks();
+      if (stopped || !server) return;
+      setDemoLinks(mergeDemoLinks(server));
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2_500);
+
     return () => {
+      stopped = true;
+      window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
       window.removeEventListener('storage', refresh);
     };

@@ -2,7 +2,7 @@ import express from "express";
 import crypto from "node:crypto";
 import path from "node:path";
 import {
-  getAddress, isAddress, isAddressEqual, verifyMessage,
+  getAddress, isAddress, isAddressEqual, parseUnits, verifyMessage,
   type Address, type Hex,
 } from "viem";
 import {
@@ -10,7 +10,7 @@ import {
   decode, recoverSigner,
 } from "@pos/shared";
 import {
-  ADMIN_TOKEN, CHAIN_ID, INR_PER_USDC, MAX_LINK_SECONDS, PORT, cancelMessage,
+  ADMIN_TOKEN, CHAIN_ID, DEMO_MERCHANT, DEMO_MODE, INR_PER_USDC, MAX_LINK_SECONDS, PORT, cancelMessage,
   isDeployed, publicBaseUrl, saveSettlement, settlementMessage, settlementRecord,
 } from "./config";
 import { findLink, insertLink, listLinks, nonceExists, updateLink } from "./store";
@@ -70,7 +70,8 @@ function sanitizeCustomer(input: any): LinkCustomer {
 }
 
 function view(link: LinkRecord, base: string): LinkView {
-  return { ...link, url: `${base}/pay/${link.id}` };
+  const url = `${base}/pay/${link.id}`;
+  return { ...link, url: link.demo ? `${url}?demo=1` : url };
 }
 
 function expireIfLate(link: LinkRecord): LinkRecord {
@@ -178,6 +179,57 @@ app.post("/api/links", ah(async (req, res) => {
   res.status(201).json({ link: view(link, publicBaseUrl(req)) });
 }));
 
+/**
+ * Demo-only link creation. Unlike POST /api/links this needs no signature or
+ * deployed contract, but it is gated by DEMO_MODE and marked demo:true so it
+ * can never be confused with a real settlement request.
+ */
+app.post("/api/demo/links", ah(async (req, res) => {
+  if (!DEMO_MODE) throw new HttpError(404, "Demo links are disabled on this server.");
+
+  const inr = Number(req.body?.inr);
+  if (!Number.isFinite(inr) || inr <= 0 || inr > 100_000_000) throw new HttpError(400, "INR amount is invalid.");
+  const seconds = Math.min(Math.max(Number(req.body?.expirySeconds) || 15 * 60, 60), MAX_LINK_SECONDS);
+  const methods = Array.isArray(req.body?.methods)
+    ? req.body.methods.filter((m: unknown) => typeof m === "string" && m.length <= 40).slice(0, 12)
+    : [];
+  const t = now();
+  const usdc = (inr / INR_PER_USDC).toFixed(6);
+
+  const request: WirePayload = {
+    v: 1,
+    c: CHAIN_ID,
+    s: settlementRecord().address,
+    r: {
+      merchant: DEMO_MERCHANT,
+      token: USDC,
+      amount: parseUnits(usdc, 6).toString(),
+      nonce: `0x${crypto.randomBytes(32).toString("hex")}`,
+      expiry: String(t + seconds),
+      ensName: "",
+    },
+    g: "0x",
+  };
+
+  const link: LinkRecord = {
+    id: `plink_demo_${crypto.randomBytes(6).toString("hex")}`,
+    merchant: DEMO_MERCHANT,
+    request,
+    inr,
+    usdc,
+    description: String(req.body?.description ?? "").slice(0, 200),
+    methods: methods.length ? methods : ["UPI", "Credit Card", "Debit Card", "Net Banking", "Digital Wallets", "NFC / Contactless", "Cryptocurrency"],
+    customer: sanitizeCustomer(req.body?.customer),
+    requireBillingAddress: false,
+    createdAt: t,
+    expiresAt: t + seconds,
+    status: "open",
+    demo: true,
+  };
+  insertLink(link);
+  res.status(201).json({ link: view(link, publicBaseUrl(req)) });
+}));
+
 app.get("/api/links", ah(async (req, res) => {
   const merchant = String(req.query.merchant ?? "");
   if (!isAddress(merchant)) throw new HttpError(400, "merchant query parameter is invalid.");
@@ -198,6 +250,26 @@ app.get("/api/links/:id/nfc", ah(async (req, res) => {
   if (!link) throw new HttpError(404, "Payment link not found.");
   if (link.status !== "open" && link.status !== "paid") throw new HttpError(410, "Payment link is no longer active.");
   res.json({ payload: JSON.stringify(link.request), link: view(link, publicBaseUrl(req)) });
+}));
+
+/** Demo-only settlement: flips a server demo link to paid without touching a chain. Idempotent. */
+app.post("/api/links/:id/simulate", ah(async (req, res) => {
+  if (!DEMO_MODE) throw new HttpError(404, "Demo settlement is disabled on this server.");
+  const link = findLink(req.params.id);
+  if (!link || !link.demo) throw new HttpError(404, "Demo link not found.");
+  expireIfLate(link);
+  if (link.status !== "open" && link.status !== "paid") {
+    throw new HttpError(409, `This demo link is ${link.status}.`);
+  }
+  if (link.status !== "paid") {
+    updateLink(link.id, {
+      status: "paid",
+      paidWithEth: false,
+      payer: DEMO_MERCHANT,
+      method: typeof req.body?.method === "string" ? String(req.body.method).slice(0, 40) : link.method ?? "UPI",
+    });
+  }
+  res.json({ link: view(link, publicBaseUrl(req)) });
 }));
 
 app.post("/api/links/:id/settle", ah(async (req, res) => {

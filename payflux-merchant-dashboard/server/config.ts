@@ -13,6 +13,11 @@ export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 export const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), "data");
 export const CHAIN_ID = CHAIN.id;
 export const MAX_LINK_SECONDS = 7 * 24 * 60 * 60;
+/** Demo links are on by default in development, off in production unless DEMO_MODE=1. */
+export const DEMO_MODE = process.env.DEMO_MODE
+  ? process.env.DEMO_MODE === "1"
+  : process.env.NODE_ENV !== "production";
+export const DEMO_MERCHANT = "0x000000000000000000000000000000000000dEaD" as const;
 
 export { USDC, WETH, SWAP_ROUTER, POOL_FEE };
 

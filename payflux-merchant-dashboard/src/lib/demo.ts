@@ -87,7 +87,7 @@ export function demoTxnFromLink(link: PaymentLinkView): Transaction {
   };
 }
 
-export function createDemoLink(input: {
+export function createLocalDemoLink(input: {
   inr: number;
   rate: number;
   description: string;
@@ -126,6 +126,7 @@ export function createDemoLink(input: {
     createdAt: now,
     expiresAt: now + input.expirySeconds,
     status: "open",
+    demo: true,
     url: `${origin}/pay/${id}?demo=1`,
   };
 
@@ -133,4 +134,102 @@ export function createDemoLink(input: {
   store[id] = link;
   write(store);
   return link;
+}
+
+/** Merge server state into the local store so both views agree on prices and statuses. */
+export function mergeDemoLinks(server: PaymentLinkView[]): PaymentLinkView[] {
+  const store = read();
+  for (const link of server) {
+    const known = store[link.id];
+    store[link.id] = known ? { ...known, ...link } : link;
+  }
+  write(store);
+  return Object.values(store).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Server-held demo links for this (shared) demo merchant, or null when the server is unreachable. */
+export async function listServerDemoLinks(): Promise<PaymentLinkView[] | null> {
+  try {
+    const res = await fetch(`/api/links?merchant=${DEMO_MERCHANT}`, {
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return Array.isArray(body?.links) ? (body.links as PaymentLinkView[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Re-read one demo link so a payment taken on the customer's phone shows up here. */
+export async function refreshDemoLink(id: string): Promise<PaymentLinkView | null> {
+  try {
+    const res = await fetch(`/api/links/${encodeURIComponent(id)}`, {
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const link = body?.link as PaymentLinkView | undefined;
+    return link?.id ? patchDemoLink(link.id, link) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Mark a server-backed demo link paid; falls back to the local copy when offline. */
+export async function simulateDemoLink(id: string, method: PaymentMethod): Promise<PaymentLinkView | null> {
+  try {
+    const res = await fetch(`/api/links/${encodeURIComponent(id)}/simulate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ method }),
+    });
+    const body = await res.json().catch(() => ({}));
+    const link = body?.link as PaymentLinkView | undefined;
+    if (res.ok && link?.id) return patchDemoLink(link.id, link);
+  } catch {
+    /* server offline — the local flag still shows the flow */
+  }
+  return patchDemoLink(id, { status: "paid", method });
+}
+
+/**
+ * Prefer a server-backed demo link so a second phone can fetch the same
+ * amount/status from /api/links/:id. Fall back to the original local-only
+ * link when the server is unreachable.
+ */
+export async function createDemoLink(input: {
+  inr: number;
+  rate: number;
+  description: string;
+  methods: PaymentMethod[];
+  customer?: { name?: string; email?: string; phone?: string };
+  expirySeconds: number;
+}): Promise<PaymentLinkView> {
+  try {
+    const res = await fetch("/api/demo/links", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        inr: input.inr,
+        description: input.description,
+        methods: input.methods,
+        customer: input.customer,
+        expirySeconds: input.expirySeconds,
+      }),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      const link = body?.link as PaymentLinkView | undefined;
+      if (link?.id && link.url) {
+        const store = read();
+        store[link.id] = link;
+        write(store);
+        return link;
+      }
+    }
+  } catch {
+    /* server offline — keep the local demo working */
+  }
+  return createLocalDemoLink(input);
 }

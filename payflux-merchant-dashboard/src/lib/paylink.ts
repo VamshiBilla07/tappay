@@ -33,6 +33,8 @@ export interface PaymentLinkView {
   createdAt: number;
   expiresAt: number;
   status: LinkStatus;
+  /** Server-backed demo links set this; legacy local demo links do not. */
+  demo?: boolean;
   url: string;
   txHash?: Hex;
   payer?: Address;
