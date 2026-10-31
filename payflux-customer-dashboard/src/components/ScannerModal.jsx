@@ -80,7 +80,11 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState("error");
-      setCameraError("This browser does not expose a camera API. Paste a UPI ID or link below.");
+      setCameraError(
+        window.isSecureContext
+          ? "This browser does not expose a camera API. Paste a UPI ID or link below."
+          : "The camera needs HTTPS. Open this page over https:// (or on localhost), then retry.",
+      );
       return;
     }
 
