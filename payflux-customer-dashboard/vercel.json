@@ -10,8 +10,6 @@
     { "src": "/(.*)", "dest": "/dist/index.html" }
   ],
   "env": {
-    "VITE_SUPABASE_URL": "@supabase_url",
-    "VITE_SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "VITE_PAYFLUX_API": "@payflux_api_url"
+    "VITE_SUPABASE_URL": "https://kbhffoafijmesnlfjhwb.supabase.co"
   }
 }
