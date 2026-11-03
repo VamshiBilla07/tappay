@@ -7,6 +7,7 @@
     "dev": "tsx watch server/index.ts",
     "dev:vite": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "vercel-build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist data",
@@ -15,7 +16,7 @@
     "smoke": "tsx scripts/api-smoke.ts"
   },
   "dependencies": {
-    "@pos/shared": "file:../../packages/shared",
+    "@pos/shared": "file:./packages/shared",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",

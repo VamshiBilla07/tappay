@@ -17,6 +17,28 @@ Every directory below is its own npm project; run `npm i` inside each one.
 - `payflux-merchant-dashboard/` — Express + Vite admin app; backend in `server/`.
 - `payflux-customer-dashboard/` — Vite customer dashboard.
 
+## Vercel deployment (both dashboards)
+
+Each dashboard is a separate Vercel project. Import the directory as a project root, then set env vars in the Vercel dashboard.
+
+### Customer dashboard (`payflux-customer-dashboard/`)
+- Static Vite site → deploys to Vercel's Edge Network.
+- `vercel.json` already configured (build: `npm run build`, output: `dist`).
+- Env vars to set in Vercel: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PAYFLUX_API` (merchant dashboard URL).
+- Mobile-responsive: viewport-fit=cover, touch-friendly 48px tap targets, safe-area insets, overflow-x:hidden.
+
+### Merchant dashboard (`payflux-merchant-dashboard/`)
+- Express API converted to Vercel serverless function (`api/server.ts`) + static Vite frontend (`dist/`).
+- `vercel.json` already configured (build: `npm run vercel-build`, routes `/api/*` to `api/server.ts`).
+- `@pos/shared` is copied into `packages/shared/` inside this directory for Vercel resolution.
+- Env vars to set in Vercel: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `INR_PER_USDC`, `ADMIN_TOKEN`.
+- Mobile-responsive: viewport-fit=cover, touch-friendly 48px tap targets, safe-area insets, overflow-x:hidden.
+
+### Supabase setup (required before deploying)
+1. Create a Supabase project.
+2. Run `payflux-merchant-dashboard/supabase/schema.sql` in the Supabase SQL editor.
+3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Vercel (merchant) and `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in Vercel (customer).
+
 ## Commands
 Contracts: `cd contracts && forge test` (blocked as committed — see Known drift). One test: `forge test --match-test <name> -vvv`.
 E2E (13 checks): `cd test-e2e && npm i && node build.js`; Terminal A `npx hardhat node`; Terminal B `npx tsx e2e.ts`. On Windows `npm test` runs POSIX through `cmd.exe` and fails — use the three commands above.
