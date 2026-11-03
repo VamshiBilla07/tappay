@@ -10,11 +10,11 @@ import { nfcErrorMessage, nfcSupport, startNfcRead } from "../lib/nfc";
 function cameraErrorMessage(err) {
   switch (err?.name) {
     case "NotAllowedError":
-      return "Camera permission blocked. Allow camera access in Chrome settings, then retry.";
+      return "Camera permission blocked. Go to Chrome settings → Site settings → Camera → Allow, then retry.";
     case "NotFoundError":
-      return "No camera found. Paste a UPI ID or payment link below instead.";
+      return "No camera found on this device. Paste a UPI ID or payment link below instead.";
     case "NotReadableError":
-      return "Camera is in use by another app. Close it and retry.";
+      return "Camera is in use by another app. Close Camera/Instagram/WhatsApp, then retry.";
     case "NotSupportedError":
       return "Camera not supported in this browser. Paste a link below instead.";
     case "OverconstrainedError":
@@ -34,6 +34,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const [nfcState, setNfcState] = useState("idle");
   const [nfcError, setNfcError] = useState("");
   const [nfcInfo, setNfcInfo] = useState("");
+  const [debugInfo, setDebugInfo] = useState("");
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -67,8 +68,12 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   }, []);
 
   const finish = useCallback((text) => {
+    setDebugInfo(`Scanned: ${text.substring(0, 60)}...`);
     const intent = resolveIntent(text);
-    if (!intent) return false;
+    if (!intent) {
+      setScanError("That QR is not a payment code. Try another QR.");
+      return false;
+    }
     stopCamera();
     nfcAbortRef.current?.abort();
     onScanRef.current(intent);
@@ -80,12 +85,11 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     setCameraState("starting");
     setCameraError("");
     setScanError("");
+    setDebugInfo("Requesting camera access…");
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState("error");
-      setCameraError(window.isSecureContext
-        ? "Camera API not available in this browser. Paste a UPI ID or link below."
-        : "Camera needs HTTPS. Open this page over https:// (like this Vercel URL), then retry.");
+      setCameraError("Camera API not available in this browser. Paste a UPI ID or link below instead.");
       return;
     }
 
@@ -111,6 +115,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       setCameraError(cameraErrorMessage(err));
       retryCountRef.current += 1;
       if (retryCountRef.current <= 2) {
+        setDebugInfo(`Camera failed, retrying in 2s (attempt ${retryCountRef.current})…`);
         setTimeout(() => void startCamera(() => cancelled), 2000);
       }
       return;
@@ -143,6 +148,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       return;
     }
     setCameraState("live");
+    setDebugInfo("Camera is live. Point at a QR code.");
     retryCountRef.current = 0;
 
     const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -259,6 +265,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     setManualError("");
     const value = manual.trim();
     if (!value) return;
+    setDebugInfo(`Manual entry: ${value.substring(0, 60)}…`);
     if (!finish(value)) {
       setManualError("Enter a UPI ID (name@bank), upi:// link, or TapPay /pay/plink_… URL.");
     }
@@ -266,6 +273,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
 
   const stepCamera = () => {
     retryCountRef.current = 0;
+    setScanError("");
     void startCamera();
   };
 
@@ -318,6 +326,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6" style={{ background: "rgba(0,0,0,.72)", color: "#fff" }}>
                 <Loader2 size={30} className="animate-spin" />
                 <div className="text-sm mt-3">Starting camera…</div>
+                {debugInfo && <div className="text-xs mt-2 opacity-70">{debugInfo}</div>}
               </div>
             )}
 
@@ -357,6 +366,12 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
             </div>
             {manualError && <p className="text-xs mt-2" style={{ color: "var(--rd)" }}>{manualError}</p>}
           </form>
+
+          {debugInfo && (
+            <div className="mt-3 rounded-xl p-2 text-[10px] text-[var(--mu)]" style={{ background: "var(--sf2)" }}>
+              {debugInfo}
+            </div>
+          )}
         </>
       ) : (
         <div className="text-center py-2">
