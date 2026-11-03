@@ -10,23 +10,23 @@ import { nfcErrorMessage, nfcSupport, startNfcRead } from "../lib/nfc";
 function cameraErrorMessage(err) {
   switch (err?.name) {
     case "NotAllowedError":
-      return "Camera permission was blocked. Allow camera access for this site, then retry.";
+      return "Camera permission blocked. Allow camera access in Chrome settings, then retry.";
     case "NotFoundError":
-      return "No camera was found on this device. You can paste a UPI ID or link below.";
+      return "No camera found. Paste a UPI ID or payment link below instead.";
     case "NotReadableError":
-      return "The camera is busy in another app. Close it and retry.";
-    case "OverconstrainedError":
-      return "This camera does not support the requested mode. Retry to use the default camera.";
+      return "Camera is in use by another app. Close it and retry.";
     case "NotSupportedError":
-      return "This browser does not support camera access. Paste a UPI ID or link below.";
+      return "Camera not supported in this browser. Paste a link below instead.";
+    case "OverconstrainedError":
+      return "Camera constraints not supported. Retry with default camera.";
     default:
-      return err?.message || "Could not start the camera.";
+      return err?.message || "Could not start camera. Paste a link below instead.";
   }
 }
 
 export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const [tab, setTab] = useState(initialTab === "nfc" ? "nfc" : "qr");
-  const [cameraState, setCameraState] = useState("idle");
+  const [cameraState, setCameraState] = useState("idle"); // idle | starting | live | error
   const [cameraError, setCameraError] = useState("");
   const [scanError, setScanError] = useState("");
   const [manual, setManual] = useState("");
@@ -42,6 +42,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const nfcAbortRef = useRef(null);
   const onScanRef = useRef(onScan);
   const support = nfcSupport();
+  const retryCountRef = useRef(0);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -82,11 +83,15 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState("error");
-      setCameraError(
-        window.isSecureContext
-          ? "This browser does not expose a camera API. Paste a UPI ID or link below."
-          : "The camera needs HTTPS. Open this page over https:// (or on localhost), then retry.",
-      );
+      setCameraError(window.isSecureContext
+        ? "Camera API not available in this browser. Paste a UPI ID or link below."
+        : "Camera needs HTTPS. Open this page over https:// (like this Vercel URL), then retry.");
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setCameraState("error");
+      setCameraError("Camera requires HTTPS. Open this page over https://, then retry.");
       return;
     }
 
@@ -104,10 +109,15 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       if (isCancelled()) return;
       setCameraState("error");
       setCameraError(cameraErrorMessage(err));
+      retryCountRef.current += 1;
+      if (retryCountRef.current <= 2) {
+        setTimeout(() => void startCamera(() => cancelled), 2000);
+      }
       return;
     }
 
-    if (isCancelled()) {
+    const cancelled = isCancelled();
+    if (cancelled) {
       stream.getTracks().forEach((track) => track.stop());
       return;
     }
@@ -117,6 +127,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     const canvas = canvasRef.current;
     if (!video || !canvas) {
       stopCamera();
+      setCameraError("Camera elements not ready. Retry camera.");
       return;
     }
 
@@ -124,32 +135,38 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     try {
       await video.play();
     } catch {
-      /* autoplay can reject while the sheet is animating; frames still arrive */
+      /* autoplay can reject while animating; frames still arrive */
     }
+
     if (isCancelled()) {
       stopCamera();
       return;
     }
     setCameraState("live");
+    retryCountRef.current = 0;
 
     const context = canvas.getContext("2d", { willReadFrequently: true });
     let lastTick = 0;
     const tick = (timestamp) => {
       if (isCancelled() || !context) return;
-      if (timestamp - lastTick > 90) {
+      if (timestamp - lastTick > 100) {
         lastTick = timestamp;
         const currentVideo = videoRef.current;
         if (currentVideo && currentVideo.readyState >= 2 && currentVideo.videoWidth) {
           canvas.width = currentVideo.videoWidth;
           canvas.height = currentVideo.videoHeight;
           context.drawImage(currentVideo, 0, 0, canvas.width, canvas.height);
-          const image = context.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(image.data, image.width, image.height, {
-            inversionAttempts: "dontInvert",
-          });
-          if (code?.data) {
-            if (finish(code.data)) return;
-            setScanError("That QR is not a UPI or TapPay payment code. Try another code.");
+          try {
+            const image = context.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(image.data, image.width, image.height, {
+              inversionAttempts: "dontInvert",
+            });
+            if (code?.data) {
+              if (finish(code.data)) return;
+              setScanError("That QR is not a payment code. Try another.");
+            }
+          } catch {
+            /* image data not ready yet */
           }
         }
       }
@@ -206,19 +223,19 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     try {
       await startNfcRead({
         signal: controller.signal,
-        onStarted: () => setNfcInfo("NFC is armed. Hold your phone near the tag or terminal."),
+        onStarted: () => setNfcInfo("NFC armed. Hold phone near the tag or terminal."),
         onReading: ({ texts }) => {
           const text = texts.find(Boolean);
           if (!text) {
             setNfcState("error");
-            setNfcError("This tag has no readable text or URL.");
+            setNfcError("This tag has no readable text.");
             return;
           }
           const intent = resolveIntent(text);
           if (!intent) {
             controller.abort();
             setNfcState("error");
-            setNfcError("That tag is not a UPI or TapPay payment code.");
+            setNfcError("That tag is not a payment code.");
             return;
           }
           controller.abort();
@@ -243,18 +260,19 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     const value = manual.trim();
     if (!value) return;
     if (!finish(value)) {
-      setManualError("Enter a UPI ID (name@bank), a upi:// link, or a TapPay /pay/plink_… URL.");
+      setManualError("Enter a UPI ID (name@bank), upi:// link, or TapPay /pay/plink_… URL.");
     }
   };
 
   const stepCamera = () => {
+    retryCountRef.current = 0;
     void startCamera();
   };
 
   return (
     <Sheet
       title="Scan to pay"
-      subtitle={tab === "qr" ? "Point the camera at a UPI or TapPay QR" : "Tap an NFC tag or merchant terminal"}
+      subtitle={tab === "qr" ? "Point camera at a UPI or TapPay QR" : "Tap an NFC tag or terminal"}
       onClose={onClose}
     >
       <div className="flex gap-2 p-1 rounded-full mb-4" style={{ background: "var(--sf2)" }}>
@@ -296,22 +314,20 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
             <span className="absolute right-[11%] bottom-[11%] w-7 h-7 rounded-br-xl" style={{ borderRight: "4px solid #fff", borderBottom: "4px solid #fff" }} />
             {cameraState === "live" && <span className="scanline" style={{ top: "20%" }} />}
 
-            {cameraState !== "live" && (
+            {cameraState === "starting" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6" style={{ background: "rgba(0,0,0,.72)", color: "#fff" }}>
-                {cameraState === "starting" ? (
-                  <>
-                    <Loader2 size={30} className="animate-spin" />
-                    <div className="text-sm mt-3">Starting camera…</div>
-                  </>
-                ) : (
-                  <>
-                    <Camera size={30} />
-                    <div className="text-sm mt-3 max-w-[260px]">{cameraError}</div>
-                    <button type="button" className="btn mt-4" onClick={stepCamera}>
-                      <RefreshCw size={15} /> Retry camera
-                    </button>
-                  </>
-                )}
+                <Loader2 size={30} className="animate-spin" />
+                <div className="text-sm mt-3">Starting camera…</div>
+              </div>
+            )}
+
+            {cameraState === "error" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6" style={{ background: "rgba(0,0,0,.72)", color: "#fff" }}>
+                <Camera size={30} />
+                <div className="text-sm mt-3 max-w-[260px]">{cameraError}</div>
+                <button type="button" className="btn mt-4" onClick={stepCamera}>
+                  <RefreshCw size={15} /> Retry camera
+                </button>
               </div>
             )}
           </div>
@@ -331,7 +347,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
                 className="flex-1 min-w-0 h-11 rounded-xl px-3 text-sm"
                 style={{ background: "var(--sf2)", border: "1px solid var(--ln)", color: "var(--tx)" }}
                 value={manual}
-                onChange={(event) => { setManual(event.target.value); setManualError(""); }}
+                onChange={(e) => { setManual(e.target.value); setManualError(""); }}
                 placeholder="name@bank or https://…/pay/plink_…"
                 autoComplete="off"
               />
@@ -344,10 +360,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
         </>
       ) : (
         <div className="text-center py-2">
-          <div
-            className="mx-auto w-20 h-20 rounded-[24px] grid place-items-center mb-4"
-            style={{ background: "var(--prbg)", color: "var(--pr)" }}
-          >
+          <div className="mx-auto w-20 h-20 rounded-[24px] grid place-items-center mb-4" style={{ background: "var(--prbg)", color: "var(--pr)" }}>
             <Nfc size={36} />
           </div>
           <h3 className="text-base font-semibold m-0">Tap to pay</h3>
@@ -390,9 +403,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
             <div className="flex items-center gap-1.5 font-medium mb-1" style={{ color: "var(--tx)" }}>
               <CheckCircle2 size={14} /> What works today
             </div>
-            Web NFC is available in Chrome on Android over HTTPS and reads NDEF URL/text tags. It
-            cannot read another phone&apos;s HCE session — for two-phone taps use the QR code or the
-            TapPay mobile app.
+            Web NFC works in Chrome on Android over HTTPS and reads NDEF URL/text tags. For two-phone taps, use QR code or TapPay mobile app.
           </div>
         </div>
       )}
