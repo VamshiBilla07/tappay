@@ -15,18 +15,19 @@ export interface SignedRequest { req: PaymentRequest; sig: Hex }
 export const randomNonce = (): Hex => bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
 
 export async function createSignedRequest(account: LocalAccount, ensName: string, usdcAmount: bigint,
-  now = Math.floor(Date.now() / 1000)): Promise<SignedRequest> {
+  now = Math.floor(Date.now() / 1000), expirySeconds = EXPIRY_SECONDS): Promise<SignedRequest> {
   const req: PaymentRequest = { merchant: account.address, token: USDC, amount: usdcAmount,
-    nonce: randomNonce(), expiry: BigInt(now + EXPIRY_SECONDS), ensName };
+    nonce: randomNonce(), expiry: BigInt(now + expirySeconds), ensName };
   const sig = await account.signTypedData({ domain: domain(), types, primaryType: "PaymentRequest", message: req });
   return { req, sig };
 }
 
-export const recoverSigner = ({ req, sig }: SignedRequest): Promise<Address> =>
-  recoverTypedDataAddress({ domain: domain(), types, primaryType: "PaymentRequest", message: req, signature: sig });
+export const recoverSigner = ({ req, sig }: SignedRequest, verifyingContract: Address = SETTLEMENT): Promise<Address> =>
+  recoverTypedDataAddress({ domain: domain(verifyingContract), types, primaryType: "PaymentRequest", message: req, signature: sig });
 
-/** Wire format shared by QR and NFC (NDEF text record). */
-export const encode = ({ req, sig }: SignedRequest) => JSON.stringify({ v: 1, c: CHAIN.id, s: SETTLEMENT,
+/** Wire format shared by QR and NFC (NDEF text record).
+ *  `verifyingContract` must match the domain the merchant signed over. */
+export const encode = ({ req, sig }: SignedRequest, verifyingContract: Address = SETTLEMENT) => JSON.stringify({ v: 1, c: CHAIN.id, s: verifyingContract,
   r: { ...req, amount: req.amount.toString(), expiry: req.expiry.toString() }, g: sig });
 export function decode(text: string): SignedRequest & { chainId: number; settlement: Address } {
   const j = JSON.parse(text);

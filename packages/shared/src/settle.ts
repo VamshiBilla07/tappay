@@ -10,30 +10,33 @@ export async function quoteEthIn(pc: PublicClient, usdcOut: bigint) {
   return { quote, maxIn: quote + (quote * SLIPPAGE_BPS) / 10_000n };
 }
 
-export async function payUsdc(pc: PublicClient, wc: WalletClient, s: SignedRequest, onStep?: (m: string) => void) {
+export async function payUsdc(pc: PublicClient, wc: WalletClient, s: SignedRequest, onStep?: (m: string) => void,
+  settlement: Address = SETTLEMENT) {
   const account = wc.account!;
-  const allowance = await pc.readContract({ address: USDC, abi: erc20Abi, functionName: "allowance", args: [account.address, SETTLEMENT] });
+  const allowance = await pc.readContract({ address: USDC, abi: erc20Abi, functionName: "allowance", args: [account.address, settlement] });
   if (allowance < s.req.amount) {
     onStep?.("Approving USDC");
-    const a = await wc.writeContract({ address: USDC, abi: erc20Abi, functionName: "approve", args: [SETTLEMENT, s.req.amount], account, chain: wc.chain });
+    const a = await wc.writeContract({ address: USDC, abi: erc20Abi, functionName: "approve", args: [settlement, s.req.amount], account, chain: wc.chain });
     await pc.waitForTransactionReceipt({ hash: a });
   }
   onStep?.("Submitting payment");
-  const hash = await wc.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: "pay", args: [s.req, s.sig], account, chain: wc.chain });
+  const hash = await wc.writeContract({ address: settlement, abi: settlementAbi, functionName: "pay", args: [s.req, s.sig], account, chain: wc.chain });
   return pc.waitForTransactionReceipt({ hash });
 }
 
 /** Contract swaps for EXACT USDC out; unspent ETH is refunded to the payer. */
-export async function payEth(pc: PublicClient, wc: WalletClient, s: SignedRequest, onStep?: (m: string) => void) {
+export async function payEth(pc: PublicClient, wc: WalletClient, s: SignedRequest, onStep?: (m: string) => void,
+  settlement: Address = SETTLEMENT) {
   onStep?.("Quoting swap");
   const { maxIn } = await quoteEthIn(pc, s.req.amount);
   onStep?.("Swapping & paying");
   const account = wc.account!;
-  const hash = await wc.writeContract({ address: SETTLEMENT, abi: settlementAbi, functionName: "payWithEth", args: [s.req, s.sig], value: maxIn, account, chain: wc.chain });
+  const hash = await wc.writeContract({ address: settlement, abi: settlementAbi, functionName: "payWithEth", args: [s.req, s.sig], value: maxIn, account, chain: wc.chain });
   return pc.waitForTransactionReceipt({ hash });
 }
 
-export function watchSettlement(pc: PublicClient, merchant: Address, nonce: `0x${string}`, cb: (tx: `0x${string}`) => void) {
-  return pc.watchContractEvent({ address: SETTLEMENT, abi: settlementAbi, eventName: "PaymentSettled",
+export function watchSettlement(pc: PublicClient, merchant: Address, nonce: `0x${string}`, cb: (tx: `0x${string}`) => void,
+  settlement: Address = SETTLEMENT) {
+  return pc.watchContractEvent({ address: settlement, abi: settlementAbi, eventName: "PaymentSettled",
     args: { merchant, nonce }, onLogs: (logs) => cb(logs[0].transactionHash), pollingInterval: 2_000 });
 }
