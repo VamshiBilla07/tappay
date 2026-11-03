@@ -9,3 +9,4 @@ coverage/
 
 # Payment server state (links.json, settlement.json)
 data/
+.vercel
