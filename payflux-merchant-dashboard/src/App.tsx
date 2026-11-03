@@ -335,9 +335,20 @@ function Dashboard() {
     }
   };
 
-  const onCreated = (link: PaymentLinkView) => {
+  const onCreated = async (link: PaymentLinkView) => {
     setLinks((prev) => [link, ...prev.filter((l) => l.id !== link.id)]);
     if (DEMO) setDemoLinks((prev) => [link, ...prev.filter((l) => l.id !== link.id)]);
+    // Always save to server so the customer dashboard can fetch it via QR scan
+    try {
+      const res = await fetch("/api/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: link.request, inr: link.inr }),
+      });
+      if (!res.ok) console.error("Failed to save link to server:", await res.text());
+    } catch (e) {
+      console.error("Failed to save link to server:", e);
+    }
   };
 
   /** A simulated demo payment: surface it everywhere the dashboard reads transactions. */
