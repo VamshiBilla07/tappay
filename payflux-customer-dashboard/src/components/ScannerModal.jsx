@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import {
-  Camera, CheckCircle2, FlashOff, Flashlight, Keyboard, Loader2, Nfc, QrCode, RefreshCw, ShieldCheck,
+  Camera, CheckCircle2, Flashlight, Keyboard, Loader2, Nfc, QrCode, RefreshCw, ShieldCheck,
 } from "lucide-react";
 import Sheet from "./Sheet";
 import { parseScan } from "../lib/payment-intent";
@@ -374,7 +374,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
           {cameraState === "live" && !torchOn && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
               <button type="button" className="btn btn2 rounded-full p-2" onClick={toggleTorch} aria-label="Turn on flashlight">
-                <FlashOff size={16} /> Flashlight
+                <Flashlight size={16} className="rotate-180" /> Flashlight
               </button>
             </div>
           )}
