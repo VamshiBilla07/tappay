@@ -143,9 +143,10 @@ function TapayCheckout({ intent, onClose, onPaid }) {
             ) : (
               <>
                 <TriangleAlert size={22} className="mx-auto" style={{ color: "var(--yl)" }} />
-                <div className="text-sm font-semibold mt-2">Request details unavailable</div>
+                <div className="text-sm font-semibold mt-2">Request not found</div>
                 <div className="mu text-xs mt-1">
-                  Open the link to see the amount and pay on the secure checkout.
+                  This payment link doesn't exist on the server. Ask the merchant to create a new
+                  payment link and share its QR code with you.
                 </div>
               </>
             )}
@@ -183,13 +184,22 @@ function TapayCheckout({ intent, onClose, onPaid }) {
           </div>
 
           {loadError && (
-            <div className="rounded-xl p-3 mt-3 text-xs flex gap-2" style={{ background: "var(--ylbg)", color: "var(--yl)" }}>
+            <div className="rounded-xl p-3 mt-3 text-xs flex gap-2" style={{ background: "var(--rdbg)", color: "var(--rd)" }}>
               <TriangleAlert size={15} style={{ flex: "none", marginTop: 1 }} />
               <span>
                 {loadError}{" "}
                 {intent.linkId.startsWith("plink_demo_")
                   ? "This demo link was created in the merchant browser and is not on the server. Create a new demo link so both phones can resolve it."
-                  : "You can still open the link below."}
+                  : "Ask the merchant to create a new payment link, then scan its QR code."}
+              </span>
+            </div>
+          )}
+          {!loadError && !link && (
+            <div className="rounded-xl p-3 mt-3 text-xs flex gap-2" style={{ background: "var(--ylbg)", color: "var(--yl)" }}>
+              <ShieldCheck size={15} style={{ flex: "none", marginTop: 1 }} />
+              <span>
+                This payment link doesn't exist on the server yet. Ask the merchant to create a
+                new payment link and share its QR code with you.
               </span>
             </div>
           )}
