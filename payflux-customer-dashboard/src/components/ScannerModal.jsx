@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import {
-  Camera, CheckCircle2, Keyboard, Loader2, Nfc, QrCode, RefreshCw, ShieldCheck,
+  Camera, CheckCircle2, FlashOff, Flashlight, Keyboard, Loader2, Nfc, QrCode, RefreshCw, ShieldCheck,
 } from "lucide-react";
 import Sheet from "./Sheet";
 import { parseScan } from "../lib/payment-intent";
@@ -10,13 +10,13 @@ import { nfcErrorMessage, nfcSupport, startNfcRead } from "../lib/nfc";
 function cameraErrorMessage(err) {
   switch (err?.name) {
     case "NotAllowedError":
-      return "Camera permission blocked. Go to Chrome settings → Site settings → Camera → Allow, then retry.";
+      return "Camera permission blocked. Chrome settings → Site settings → Camera → Allow.";
     case "NotFoundError":
-      return "No camera found on this device. Paste a UPI ID or payment link below instead.";
+      return "No camera found. Paste a UPI ID or payment link below instead.";
     case "NotReadableError":
-      return "Camera is in use by another app. Close Camera/Instagram/WhatsApp, then retry.";
+      return "Camera in use by another app. Close it, then retry.";
     case "NotSupportedError":
-      return "Camera not supported in this browser. Paste a link below instead.";
+      return "Camera not supported. Paste a link below instead.";
     case "OverconstrainedError":
       return "Camera constraints not supported. Retry with default camera.";
     default:
@@ -35,6 +35,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const [nfcError, setNfcError] = useState("");
   const [nfcInfo, setNfcInfo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
+  const [torchOn, setTorchOn] = useState(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -44,6 +45,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const onScanRef = useRef(onScan);
   const support = nfcSupport();
   const retryCountRef = useRef(0);
+  const lastDecodeRef = useRef(0);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -58,6 +60,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     streamRef.current = null;
     stream?.getTracks().forEach((track) => track.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
+    setTorchOn(false);
   }, []);
 
   const resolveIntent = useCallback((text) => {
@@ -68,7 +71,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   }, []);
 
   const finish = useCallback((text) => {
-    setDebugInfo(`Scanned: ${text.substring(0, 60)}...`);
+    setDebugInfo(`Scanned: ${text.substring(0, 60)}…`);
     const intent = resolveIntent(text);
     if (!intent) {
       setScanError("That QR is not a payment code. Try another QR.");
@@ -80,6 +83,21 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     return true;
   }, [resolveIntent, stopCamera]);
 
+  const toggleTorch = async () => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    try {
+      const track = stream.getVideoTracks()[0];
+      if (track.getCapabilities?.().torch) {
+        const next = !torchOn;
+        await track.applyConstraints({ advanced: [{ torch: next }] });
+        setTorchOn(next);
+      }
+    } catch {
+      /* torch not available on this device */
+    }
+  };
+
   const startCamera = useCallback(async (isCancelled = () => false) => {
     stopCamera();
     setCameraState("starting");
@@ -89,7 +107,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState("error");
-      setCameraError("Camera API not available in this browser. Paste a UPI ID or link below instead.");
+      setCameraError("Camera API not available. Paste a UPI ID or link below instead.");
       return;
     }
 
@@ -105,8 +123,8 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
         audio: false,
         video: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 1280 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
         },
       });
     } catch (err) {
@@ -115,8 +133,8 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       setCameraError(cameraErrorMessage(err));
       retryCountRef.current += 1;
       if (retryCountRef.current <= 2) {
-        setDebugInfo(`Camera failed, retrying in 2s (attempt ${retryCountRef.current})…`);
-        setTimeout(() => void startCamera(() => cancelled), 2000);
+        setDebugInfo(`Retrying camera in 1s…`);
+        setTimeout(() => void startCamera(() => cancelled), 1000);
       }
       return;
     }
@@ -140,7 +158,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     try {
       await video.play();
     } catch {
-      /* autoplay can reject while animating; frames still arrive */
+      /* autoplay can reject while animating */
     }
 
     if (isCancelled()) {
@@ -148,14 +166,14 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       return;
     }
     setCameraState("live");
-    setDebugInfo("Camera is live. Point at a QR code.");
+    setDebugInfo("Camera live. Point at QR code.");
     retryCountRef.current = 0;
 
     const context = canvas.getContext("2d", { willReadFrequently: true });
     let lastTick = 0;
     const tick = (timestamp) => {
       if (isCancelled() || !context) return;
-      if (timestamp - lastTick > 100) {
+      if (timestamp - lastTick > 60) { // scan every 60ms for faster detection
         lastTick = timestamp;
         const currentVideo = videoRef.current;
         if (currentVideo && currentVideo.readyState >= 2 && currentVideo.videoWidth) {
@@ -168,18 +186,22 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
               inversionAttempts: "dontInvert",
             });
             if (code?.data) {
-              if (finish(code.data)) return;
-              setScanError("That QR is not a payment code. Try another.");
+              const now = Date.now();
+              if (now - lastDecodeRef.current > 500) {
+                lastDecodeRef.current = now;
+                if (finish(code.data)) return;
+                setScanError("Not a payment QR. Try another.");
+              }
             }
           } catch {
-            /* image data not ready yet */
+            /* image not ready */
           }
         }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [finish, stopCamera]);
+  }, [finish, stopCamera, torchOn]);
 
   useEffect(() => {
     if (tab !== "qr") {
@@ -229,7 +251,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     try {
       await startNfcRead({
         signal: controller.signal,
-        onStarted: () => setNfcInfo("NFC armed. Hold phone near the tag or terminal."),
+        onStarted: () => setNfcInfo("NFC armed. Hold phone near the tag."),
         onReading: ({ texts }) => {
           const text = texts.find(Boolean);
           if (!text) {
@@ -265,7 +287,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
     setManualError("");
     const value = manual.trim();
     if (!value) return;
-    setDebugInfo(`Manual entry: ${value.substring(0, 60)}…`);
+    setDebugInfo(`Manual: ${value.substring(0, 60)}…`);
     if (!finish(value)) {
       setManualError("Enter a UPI ID (name@bank), upi:// link, or TapPay /pay/plink_… URL.");
     }
@@ -274,6 +296,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const stepCamera = () => {
     retryCountRef.current = 0;
     setScanError("");
+    setDebugInfo("Restarting camera…");
     void startCamera();
   };
 
@@ -340,6 +363,21 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
               </div>
             )}
           </div>
+
+          {cameraState === "live" && torchOn && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+              <button type="button" className="btn btn2 rounded-full p-2" onClick={toggleTorch} aria-label="Turn off flashlight">
+                <Flashlight size={16} /> Torch on
+              </button>
+            </div>
+          )}
+          {cameraState === "live" && !torchOn && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+              <button type="button" className="btn btn2 rounded-full p-2" onClick={toggleTorch} aria-label="Turn on flashlight">
+                <FlashOff size={16} /> Flashlight
+              </button>
+            </div>
+          )}
 
           {scanError && <p className="text-xs mt-2" style={{ color: "var(--rd)" }}>{scanError}</p>}
           <p className="mu text-xs mt-2 mb-0">
