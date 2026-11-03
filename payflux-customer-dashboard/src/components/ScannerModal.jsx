@@ -17,6 +17,8 @@ function cameraErrorMessage(err) {
       return "The camera is busy in another app. Close it and retry.";
     case "OverconstrainedError":
       return "This camera does not support the requested mode. Retry to use the default camera.";
+    case "NotSupportedError":
+      return "This browser does not support camera access. Paste a UPI ID or link below.";
     default:
       return err?.message || "Could not start the camera.";
   }
@@ -24,7 +26,7 @@ function cameraErrorMessage(err) {
 
 export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
   const [tab, setTab] = useState(initialTab === "nfc" ? "nfc" : "qr");
-  const [cameraState, setCameraState] = useState("starting");
+  const [cameraState, setCameraState] = useState("idle");
   const [cameraError, setCameraError] = useState("");
   const [scanError, setScanError] = useState("");
   const [manual, setManual] = useState("");
@@ -258,7 +260,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       <div className="flex gap-2 p-1 rounded-full mb-4" style={{ background: "var(--sf2)" }}>
         <button
           type="button"
-          className="flex-1 flex items-center justify-center gap-2 h-10 rounded-full text-sm font-medium"
+          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-full text-sm font-medium"
           style={tab === "qr" ? { background: "var(--sf)", color: "var(--pr)", boxShadow: "0 1px 3px rgba(0,0,0,.12)" } : { color: "var(--mu)" }}
           onClick={() => setTab("qr")}
         >
@@ -266,7 +268,7 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
         </button>
         <button
           type="button"
-          className="flex-1 flex items-center justify-center gap-2 h-10 rounded-full text-sm font-medium"
+          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-full text-sm font-medium"
           style={tab === "nfc" ? { background: "var(--sf)", color: "var(--pr)", boxShadow: "0 1px 3px rgba(0,0,0,.12)" } : { color: "var(--mu)" }}
           onClick={() => setTab("nfc")}
         >
@@ -277,7 +279,14 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
       {tab === "qr" ? (
         <>
           <div className="relative rounded-2xl overflow-hidden bg-black" style={{ aspectRatio: "1 / 1" }}>
-            <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              playsInline
+              webkit-playsinline
+              muted
+              autoPlay
+            />
             <canvas ref={canvasRef} className="hidden" />
 
             <div className="absolute inset-[11%] rounded-2xl" style={{ border: "1px solid rgba(255,255,255,.35)" }} />
@@ -326,7 +335,9 @@ export default function ScannerModal({ initialTab = "qr", onClose, onScan }) {
                 placeholder="name@bank or https://…/pay/plink_…"
                 autoComplete="off"
               />
-              <button className="btn" type="submit" disabled={!manual.trim()}>Open</button>
+              <button className="btn" type="submit" disabled={!manual.trim()}>
+                Open
+              </button>
             </div>
             {manualError && <p className="text-xs mt-2" style={{ color: "var(--rd)" }}>{manualError}</p>}
           </form>

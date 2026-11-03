@@ -1,18 +1,19 @@
 /**
  * Vercel serverless handler for the PayFlux merchant API.
- * Self-contained (no @pos/shared dependency) for serverless compatibility.
+ * Uses Supabase for persistent link storage (shared across deployments).
  */
 
 import express from "express";
 import crypto from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 import {
   getAddress, isAddress, isAddressEqual, parseUnits, verifyMessage,
   type Address, type Hex,
 } from "viem";
 
-// ── Shared constants (inlined from @pos/shared) ──────────────────────
+// ── Shared constants (inlined for serverless compatibility) ──────────
 
-export const CHAIN_ID = 84532; // Base Sepolia
+export const CHAIN_ID = 84532;
 export const CHAIN_NAME = "baseSepolia";
 export const USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 export const WETH = "0x4200000000000000000000000000000000000006";
@@ -26,6 +27,13 @@ export const DEMO_MERCHANT = "0x000000000000000000000000000000000000dEaD" as Add
 export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 export const INR_PER_USDC = Math.max(1, Number(process.env.INR_PER_USDC || 85));
 export const PORT = Number(process.env.PORT || 3000);
+
+// ── Supabase client ──────────────────────────────────────────────────
+
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
+const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -78,36 +86,102 @@ interface LinkView extends LinkRecord {
   url: string;
 }
 
-// ── In-memory store (replaces Supabase for serverless; use Supabase in prod) ─────
+// ── Supabase store ───────────────────────────────────────────────────
 
-const links = new Map<string, LinkRecord>();
-
-function findLink(id: string): LinkRecord | undefined {
-  return links.get(id);
+async function findLink(id: string): Promise<LinkRecord | undefined> {
+  const { data, error } = await sb
+    .from("links")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error || !data) return undefined;
+  return fromRow(data);
 }
 
-function listLinks(merchant: string): LinkRecord[] {
-  const m = merchant.toLowerCase();
-  return Array.from(links.values())
-    .filter((l) => l.merchant.toLowerCase() === m)
-    .sort((a, b) => b.createdAt - a.createdAt);
+async function listLinks(merchant: string): Promise<LinkRecord[]> {
+  const { data, error } = await sb
+    .from("links")
+    .select("*")
+    .eq("merchant", merchant.toLowerCase())
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data.map(fromRow);
 }
 
-function nonceExists(nonce: string): boolean {
-  const n = nonce.toLowerCase();
-  return Array.from(links.values()).some((l) => l.request.r.nonce.toLowerCase() === n);
+async function nonceExists(nonce: string): Promise<boolean> {
+  const { data } = await sb
+    .from("links")
+    .select("id")
+    .filter("request->r->>nonce", "eq", nonce.toLowerCase())
+    .limit(1);
+  return !!(data && data.length > 0);
 }
 
-function insertLink(link: LinkRecord): void {
-  links.set(link.id, link);
+async function insertLink(link: LinkRecord): Promise<void> {
+  const { error } = await sb.from("links").insert(toRow(link));
+  if (error) throw error;
 }
 
-function updateLink(id: string, patch: Partial<LinkRecord>): LinkRecord | undefined {
-  const link = findLink(id);
-  if (!link) return undefined;
-  const updated = { ...link, ...patch };
-  links.set(id, updated);
-  return updated;
+async function updateLink(id: string, patch: Partial<LinkRecord>): Promise<LinkRecord | undefined> {
+  const row: any = {};
+  if (patch.status !== undefined) row.status = patch.status;
+  if (patch.txHash !== undefined) row.tx_hash = patch.txHash ?? null;
+  if (patch.payer !== undefined) row.payer = patch.payer ?? null;
+  if (patch.paidWithEth !== undefined) row.paid_with_eth = patch.paidWithEth ?? null;
+  if (patch.method !== undefined) row.method = patch.method ?? null;
+
+  const { data, error } = await sb
+    .from("links")
+    .update(row)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error || !data) return undefined;
+  return fromRow(data);
+}
+
+function toRow(link: LinkRecord) {
+  return {
+    id: link.id,
+    merchant: link.merchant,
+    request: link.request,
+    inr: link.inr,
+    usdc: link.usdc,
+    description: link.description,
+    methods: link.methods,
+    customer: link.customer,
+    require_billing_address: link.requireBillingAddress,
+    created_at: link.createdAt,
+    expires_at: link.expiresAt,
+    status: link.status,
+    demo: link.demo ?? false,
+    tx_hash: link.txHash ?? null,
+    payer: link.payer ?? null,
+    paid_with_eth: link.paidWithEth ?? null,
+    method: link.method ?? null,
+  };
+}
+
+function fromRow(row: any): LinkRecord {
+  return {
+    id: row.id,
+    merchant: row.merchant,
+    request: row.request,
+    inr: row.inr,
+    usdc: row.usdc,
+    description: row.description ?? "",
+    methods: row.methods ?? [],
+    customer: row.customer ?? {},
+    requireBillingAddress: row.require_billing_address ?? false,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    status: row.status,
+    demo: row.demo ?? undefined,
+    txHash: row.tx_hash ?? undefined,
+    payer: row.payer ?? undefined,
+    paidWithEth: row.paid_with_eth ?? undefined,
+    method: row.method ?? undefined,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -208,7 +282,7 @@ function configPayload() {
 const app = express();
 app.use(express.json({ limit: "128kb" }));
 
-// ── CORS for customer dashboard cross-origin calls ──────────────────
+// ── CORS for customer dashboard cross-origin calls ────────────────────
 app.use((_req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
@@ -219,11 +293,6 @@ app.use((_req, res, next) => {
   }
   next();
 });
-
-const ah = (fn: (req: express.Request, res: express.Response) => Promise<unknown>) =>
-  (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    fn(req, res).catch(next);
-  };
 
 /* ── config / health ─────────────────────────────────────────────── */
 
@@ -237,121 +306,168 @@ app.get("/api/health", (_req, res) => {
 
 /* ── create / read / settle links ────────────────────────────────── */
 
-app.post("/api/links", ah(async (req, res) => {
-  const wire = normalizeWire(req.body?.payload);
+app.post("/api/links", async (req, res, next) => {
+  try {
+    const wire = normalizeWire(req.body?.payload);
 
-  const t = now();
-  const expiry = Number(wire.r.expiry);
-  if (expiry <= t + EXPIRY_SAFETY_SECONDS) throw new HttpError(400, "Request expires too soon.");
-  if (expiry - t > MAX_LINK_SECONDS + 60) throw new HttpError(400, "Request expiry is longer than 7 days.");
-  if (wire.r.amount <= 0n) throw new HttpError(400, "Request amount must be greater than zero.");
+    const t = now();
+    const expiry = Number(wire.r.expiry);
+    if (expiry <= t + EXPIRY_SAFETY_SECONDS) throw new HttpError(400, "Request expires too soon.");
+    if (expiry - t > MAX_LINK_SECONDS + 60) throw new HttpError(400, "Request expiry is longer than 7 days.");
+    if (wire.r.amount <= 0n) throw new HttpError(400, "Request amount must be greater than zero.");
 
-  if (await nonceExists(wire.r.nonce)) throw new HttpError(409, "This request nonce was already used.");
+    if (await nonceExists(wire.r.nonce)) throw new HttpError(409, "This request nonce was already used.");
 
-  const inr = Number(req.body?.inr);
-  if (!Number.isFinite(inr) || inr <= 0 || inr > 100_000_000) throw new HttpError(400, "INR amount is invalid.");
-  const usdc = Number(wire.r.amount) / 1e6;
-  if (Math.abs(usdc - inr / INR_PER_USDC) > 0.01) {
-    throw new HttpError(400, `USDC amount does not match ₹${inr} at the configured rate.`);
-  }
+    const inr = Number(req.body?.inr);
+    if (!Number.isFinite(inr) || inr <= 0 || inr > 100_000_000) throw new HttpError(400, "INR amount is invalid.");
+    const usdc = Number(wire.r.amount) / 1e6;
+    if (Math.abs(usdc - inr / INR_PER_USDC) > 0.01) {
+      throw new HttpError(400, `USDC amount does not match ₹${inr} at the configured rate.`);
+    }
 
-  const methods = Array.isArray(req.body?.methods)
-    ? req.body.methods.filter((m: unknown) => typeof m === "string" && m.length <= 40).slice(0, 12)
-    : [];
+    const methods = Array.isArray(req.body?.methods)
+      ? req.body.methods.filter((m: unknown) => typeof m === "string" && m.length <= 40).slice(0, 12)
+      : [];
 
-  const link: LinkRecord = {
-    id: `plink_${crypto.randomBytes(9).toString("base64url")}`,
-    merchant: getAddress(wire.r.merchant),
-    request: wire,
-    inr,
-    usdc: usdc.toFixed(6),
-    description: String(req.body?.description ?? "").slice(0, 200),
-    methods: methods.length ? methods : ["UPI", "Credit Card", "Debit Card", "Net Banking", "Digital Wallets", "NFC / Contactless", "Cryptocurrency"],
-    customer: sanitizeCustomer(req.body?.customer),
-    requireBillingAddress: Boolean(req.body?.requireBillingAddress),
-    createdAt: t,
-    expiresAt: expiry,
-    status: "open",
-  };
-  insertLink(link);
-  res.status(201).json({ link: view(link, publicBaseUrl(req)) });
+    const link: LinkRecord = {
+      id: `plink_${crypto.randomBytes(9).toString("base64url")}`,
+      merchant: getAddress(wire.r.merchant),
+      request: wire,
+      inr,
+      usdc: usdc.toFixed(6),
+      description: String(req.body?.description ?? "").slice(0, 200),
+      methods: methods.length ? methods : ["UPI", "Credit Card", "Debit Card", "Net Banking", "Digital Wallets", "NFC / Contactless", "Cryptocurrency"],
+      customer: sanitizeCustomer(req.body?.customer),
+      requireBillingAddress: Boolean(req.body?.requireBillingAddress),
+      createdAt: t,
+      expiresAt: expiry,
+      status: "open",
+    };
+    await insertLink(link);
+    res.status(201).json({ link: view(link, publicBaseUrl(req)) });
+  } catch (err) { next(err); }
 }));
 
-app.get("/api/links", ah(async (req, res) => {
-  const merchant = String(req.query.merchant ?? "");
-  if (!isAddress(merchant)) throw new HttpError(400, "merchant query parameter is invalid.");
-  const base = publicBaseUrl(req);
-  const links = listLinks(merchant).map((l) => view(expireIfLate(l), base));
-  res.json({ links });
+app.get("/api/links", async (req, res, next) => {
+  try {
+    const merchant = String(req.query.merchant ?? "");
+    if (!isAddress(merchant)) throw new HttpError(400, "merchant query parameter is invalid.");
+    const base = publicBaseUrl(req);
+    const links = (await listLinks(merchant)).map((l) => view(expireIfLate(l), base));
+    res.json({ links });
+  } catch (err) { next(err); }
 }));
 
-app.get("/api/links/:id", ah(async (req, res) => {
-  const link = findLink(req.params.id);
-  if (!link) throw new HttpError(404, "Payment link not found.");
-  res.json({ link: view(expireIfLate(link), publicBaseUrl(req)) });
+app.get("/api/links/:id", async (req, res, next) => {
+  try {
+    const link = await findLink(req.params.id);
+    if (!link) throw new HttpError(404, "Payment link not found.");
+    res.json({ link: view(expireIfLate(link), publicBaseUrl(req)) });
+  } catch (err) { next(err); }
 }));
 
-app.post("/api/links/:id/settle", ah(async (req, res) => {
-  const link = findLink(req.params.id);
-  if (!link) throw new HttpError(404, "Payment link not found.");
-  const txHash = String(req.body?.txHash ?? "");
-  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new HttpError(400, "txHash is invalid.");
+app.post("/api/links/:id/settle", async (req, res, next) => {
+  try {
+    const link = await findLink(req.params.id);
+    if (!link) throw new HttpError(404, "Payment link not found.");
+    const txHash = String(req.body?.txHash ?? "");
+    if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new HttpError(400, "txHash is invalid.");
 
-  if (link.status !== "paid") {
+    if (link.status !== "paid") {
+      await updateLink(link.id, {
+        status: "paid",
+        txHash: txHash as Hex,
+        payer: link.request.r.merchant,
+        paidWithEth: false,
+        method: typeof req.body?.method === "string" ? String(req.body.method).slice(0, 40) : link.method,
+      });
+    }
+    res.json({ link: view(link, publicBaseUrl(req)) });
+  } catch (err) { next(err); }
+}));
+
+app.post("/api/links/:id/simulate", async (req, res, next) => {
+  try {
+    const link = await findLink(req.params.id);
+    if (!link) throw new HttpError(404, "Payment link not found.");
+    if (link.status !== "open") {
+      throw new HttpError(409, `This link is ${link.status}.`);
+    }
+    const method = typeof req.body?.method === "string" ? String(req.body.method).slice(0, 40) : "UPI";
     await updateLink(link.id, {
       status: "paid",
-      txHash: txHash as Hex,
-      payer: link.request.r.merchant,
       paidWithEth: false,
-      method: typeof req.body?.method === "string" ? String(req.body.method).slice(0, 40) : link.method,
+      payer: link.request.r.merchant,
+      method,
     });
-  }
-  res.json({ link: view(link, publicBaseUrl(req)) });
+    res.json({ link: view(link, publicBaseUrl(req)) });
+  } catch (err) { next(err); }
 }));
 
-app.patch("/api/links/:id", ah(async (req, res) => {
-  const link = findLink(req.params.id);
-  if (!link) throw new HttpError(404, "Payment link not found.");
-  if (req.body?.status !== "cancelled") throw new HttpError(400, "Only cancellation is supported.");
-  if (link.status === "paid") throw new HttpError(409, "A settled link cannot be cancelled.");
-
-  const merchant = String(req.body?.merchant ?? "");
-  const signature = String(req.body?.signature ?? "");
-  if (!isAddress(merchant) || !signature) throw new HttpError(400, "merchant and signature are required.");
-
-  let ok = false;
+app.patch("/api/links/:id", async (req, res, next) => {
   try {
-    ok = await verifyMessage({
-      address: getAddress(merchant),
-      message: cancelMessage(link.id),
-      signature: signature as Hex,
-    });
-  } catch {
-    ok = false;
-  }
-  if (!ok || !isAddressEqual(getAddress(merchant), link.merchant)) {
-    throw new HttpError(401, "Cancellation must be signed by the merchant wallet.");
-  }
-  await updateLink(link.id, { status: "cancelled" });
-  res.json({ link: view(link, publicBaseUrl(req)) });
+    const link = await findLink(req.params.id);
+    if (!link) throw new HttpError(404, "Payment link not found.");
+    if (req.body?.status !== "cancelled") throw new HttpError(400, "Only cancellation is supported.");
+    if (link.status === "paid") throw new HttpError(409, "A settled link cannot be cancelled.");
+
+    const merchant = String(req.body?.merchant ?? "");
+    const signature = String(req.body?.signature ?? "");
+    if (!isAddress(merchant) || !signature) throw new HttpError(400, "merchant and signature are required.");
+
+    let ok = false;
+    try {
+      ok = await verifyMessage({
+        address: getAddress(merchant),
+        message: cancelMessage(link.id),
+        signature: signature as Hex,
+      });
+    } catch {
+      ok = false;
+    }
+    if (!ok || !isAddressEqual(getAddress(merchant), link.merchant)) {
+      throw new HttpError(401, "Cancellation must be signed by the merchant wallet.");
+    }
+    await updateLink(link.id, { status: "cancelled" });
+    res.json({ link: view(link, publicBaseUrl(req)) });
+  } catch (err) { next(err); }
 }));
 
-/* ── demo-only simulate (for customer dashboard testing) ─────────── */
+/* ── merchant helpers ───────────────────────────────────────────── */
 
-app.post("/api/links/:id/simulate", ah(async (req, res) => {
-  const link = findLink(req.params.id);
-  if (!link) throw new HttpError(404, "Payment link not found.");
-  if (link.status !== "open") {
-    throw new HttpError(409, `This link is ${link.status}.`);
-  }
-  const method = typeof req.body?.method === "string" ? String(req.body.method).slice(0, 40) : "UPI";
-  await updateLink(link.id, {
-    status: "paid",
-    paidWithEth: false,
-    payer: link.request.r.merchant,
-    method,
-  });
-  res.json({ link: view(link, publicBaseUrl(req)) });
+app.get("/api/merchant/:address/balance", async (_req, res, next) => {
+  try {
+    const address = _req.params.address;
+    if (!isAddress(address)) throw new HttpError(400, "Address is invalid.");
+    res.json({ balance: "0", decimals: 6 });
+  } catch (err) { next(err); }
+}));
+
+/* ── deploy / adopt a settlement contract ───────────────────────── */
+
+app.post("/api/admin/settlement", async (req, res, next) => {
+  try {
+    if (ADMIN_TOKEN && req.get("x-admin-token") !== ADMIN_TOKEN) {
+      throw new HttpError(401, "Admin token required.");
+    }
+    const address = String(req.body?.address ?? "");
+    const deployer = String(req.body?.deployer ?? "");
+    const signature = String(req.body?.signature ?? "");
+    if (!isAddress(address) || !isAddress(deployer) || !signature) {
+      throw new HttpError(400, "address, deployer and signature are required.");
+    }
+
+    const signed = settlementMessage(getAddress(address), getAddress(deployer));
+    let ok = false;
+    try {
+      ok = await verifyMessage({ address: getAddress(deployer), message: signed, signature: signature as Hex });
+    } catch {
+      ok = false;
+    }
+    if (!ok) throw new HttpError(401, "The deployer signature is invalid.");
+
+    res.json(configPayload());
+  } catch (err) { next(err); }
 }));
 
 /* ── error handler ──────────────────────────────────────────────── */
