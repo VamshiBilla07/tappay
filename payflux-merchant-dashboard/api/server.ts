@@ -208,6 +208,18 @@ function configPayload() {
 const app = express();
 app.use(express.json({ limit: "128kb" }));
 
+// ── CORS for customer dashboard cross-origin calls ──────────────────
+app.use((_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, x-admin-token");
+  if (_req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 const ah = (fn: (req: express.Request, res: express.Response) => Promise<unknown>) =>
   (req: express.Request, res: express.Response, next: express.NextFunction) => {
     fn(req, res).catch(next);
@@ -321,6 +333,24 @@ app.patch("/api/links/:id", ah(async (req, res) => {
     throw new HttpError(401, "Cancellation must be signed by the merchant wallet.");
   }
   await updateLink(link.id, { status: "cancelled" });
+  res.json({ link: view(link, publicBaseUrl(req)) });
+}));
+
+/* ── demo-only simulate (for customer dashboard testing) ─────────── */
+
+app.post("/api/links/:id/simulate", ah(async (req, res) => {
+  const link = findLink(req.params.id);
+  if (!link) throw new HttpError(404, "Payment link not found.");
+  if (link.status !== "open") {
+    throw new HttpError(409, `This link is ${link.status}.`);
+  }
+  const method = typeof req.body?.method === "string" ? String(req.body.method).slice(0, 40) : "UPI";
+  await updateLink(link.id, {
+    status: "paid",
+    paidWithEth: false,
+    payer: link.request.r.merchant,
+    method,
+  });
   res.json({ link: view(link, publicBaseUrl(req)) });
 }));
 

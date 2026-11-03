@@ -19,19 +19,26 @@ Every directory below is its own npm project; run `npm i` inside each one.
 
 ## Vercel deployment (both dashboards)
 
-Each dashboard is a separate Vercel project. Import the directory as a project root, then set env vars in the Vercel dashboard.
+Both dashboards are deployed and live:
+
+| Dashboard | Production URL |
+|-----------|---------------|
+| Merchant dashboard | https://payflux-merchant-dashboard-six.vercel.app |
+| Customer dashboard | https://payflux-customer-dashboard.vercel.app |
+
+Each dashboard is a separate Vercel project:
 
 ### Customer dashboard (`payflux-customer-dashboard/`)
 - Static Vite site → deploys to Vercel's Edge Network.
 - `vercel.json` already configured (build: `npm run build`, output: `dist`).
-- Env vars to set in Vercel: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PAYFLUX_API` (merchant dashboard URL).
+- Env vars set in Vercel: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PAYFLUX_API`.
 - Mobile-responsive: viewport-fit=cover, touch-friendly 48px tap targets, safe-area insets, overflow-x:hidden.
 
 ### Merchant dashboard (`payflux-merchant-dashboard/`)
-- Express API converted to Vercel serverless function (`api/server.ts`) + static Vite frontend (`dist/`).
+- Express API as Vercel serverless function (`api/server.ts`) + static Vite frontend (`dist/`).
 - `vercel.json` already configured (build: `npm run vercel-build`, routes `/api/*` to `api/server.ts`).
-- `@pos/shared` is copied into `packages/shared/` inside this directory for Vercel resolution.
-- Env vars to set in Vercel: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `INR_PER_USDC`, `ADMIN_TOKEN`.
+- `@pos/shared` dependency removed from serverless function (inlined constants) for serverless compatibility.
+- Env vars set in Vercel: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `INR_PER_USDC`, `ADMIN_TOKEN`.
 - Mobile-responsive: viewport-fit=cover, touch-friendly 48px tap targets, safe-area insets, overflow-x:hidden.
 
 ### Supabase setup (required before deploying)

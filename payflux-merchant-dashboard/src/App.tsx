@@ -461,7 +461,7 @@ function Dashboard() {
             {config?.settlement && !config.deployed ? ' (not deployed)' : ''}
           </span>
           <span className="font-mono">
-            {config ? `${config.settlement.slice(0, 8)}…${config.settlement.slice(-6)}` : 'loading config…'}
+            {config?.settlement ? `${config.settlement.slice(0, 8)}…${config.settlement.slice(-6)}` : '—'}
           </span>
         </footer>
       </main>
