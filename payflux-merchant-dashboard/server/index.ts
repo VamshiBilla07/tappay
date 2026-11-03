@@ -74,19 +74,21 @@ function view(link: LinkRecord, base: string): LinkView {
   return { ...link, url: link.demo ? `${url}?demo=1` : url };
 }
 
-function expireIfLate(link: LinkRecord): LinkRecord {
+async function expireIfLate(link: LinkRecord): Promise<LinkRecord> {
   if (link.status === "open" && now() >= link.expiresAt) {
-    updateLink(link.id, { status: "expired" });
+    await await updateLink(link.id, { status: "expired" });
+    link.status = "expired";
   }
   return link;
 }
 
 async function reconcile(link: LinkRecord): Promise<LinkRecord> {
-  expireIfLate(link);
+  await expireIfLate(link);
   if (link.status !== "open" || !isDeployed(link.request.s)) return link;
   try {
     if (await nonceUsed(link.request.s, link.merchant, link.request.r.nonce)) {
-      updateLink(link.id, { status: "paid" });
+      await await updateLink(link.id, { status: "paid" });
+      link.status = "paid";
     }
   } catch {
     /* RPC hiccup — the link is still payable; don't fail the read */
@@ -155,7 +157,7 @@ app.post("/api/links", ah(async (req, res) => {
   if (Math.abs(usdc - inr / INR_PER_USDC) > 0.01) {
     throw new HttpError(400, `USDC amount does not match ₹${inr} at the configured rate.`);
   }
-  if (nonceExists(decoded.req.nonce)) throw new HttpError(409, "This request nonce was already used.");
+  if (await nonceExists(decoded.req.nonce)) throw new HttpError(409, "This request nonce was already used.");
 
   const methods = Array.isArray(req.body?.methods)
     ? req.body.methods.filter((m: unknown) => typeof m === "string" && m.length <= 40).slice(0, 12)
@@ -175,7 +177,7 @@ app.post("/api/links", ah(async (req, res) => {
     expiresAt: expiry,
     status: "open",
   };
-  insertLink(link);
+  await insertLink(link);
   res.status(201).json({ link: view(link, publicBaseUrl(req)) });
 }));
 
@@ -226,7 +228,7 @@ app.post("/api/demo/links", ah(async (req, res) => {
     status: "open",
     demo: true,
   };
-  insertLink(link);
+  await insertLink(link);
   res.status(201).json({ link: view(link, publicBaseUrl(req)) });
 }));
 
@@ -234,19 +236,20 @@ app.get("/api/links", ah(async (req, res) => {
   const merchant = String(req.query.merchant ?? "");
   if (!isAddress(merchant)) throw new HttpError(400, "merchant query parameter is invalid.");
   const base = publicBaseUrl(req);
-  const links = listLinks(merchant).map((l) => view(expireIfLate(l), base));
+  const allLinks = await listLinks(merchant);
+  const links = await Promise.all(allLinks.map(async (l) => view(await expireIfLate(l), base)));
   res.json({ links });
 }));
 
 app.get("/api/links/:id", ah(async (req, res) => {
-  const link = findLink(req.params.id);
+  const link = await findLink(req.params.id);
   if (!link) throw new HttpError(404, "Payment link not found.");
   await reconcile(link);
   res.json({ link: view(link, publicBaseUrl(req)) });
 }));
 
 app.get("/api/links/:id/nfc", ah(async (req, res) => {
-  const link = findLink(req.params.id);
+  const link = await findLink(req.params.id);
   if (!link) throw new HttpError(404, "Payment link not found.");
   if (link.status !== "open" && link.status !== "paid") throw new HttpError(410, "Payment link is no longer active.");
   res.json({ payload: JSON.stringify(link.request), link: view(link, publicBaseUrl(req)) });
@@ -255,14 +258,14 @@ app.get("/api/links/:id/nfc", ah(async (req, res) => {
 /** Demo-only settlement: flips a server demo link to paid without touching a chain. Idempotent. */
 app.post("/api/links/:id/simulate", ah(async (req, res) => {
   if (!DEMO_MODE) throw new HttpError(404, "Demo settlement is disabled on this server.");
-  const link = findLink(req.params.id);
+  const link = await findLink(req.params.id);
   if (!link || !link.demo) throw new HttpError(404, "Demo link not found.");
   expireIfLate(link);
   if (link.status !== "open" && link.status !== "paid") {
     throw new HttpError(409, `This demo link is ${link.status}.`);
   }
   if (link.status !== "paid") {
-    updateLink(link.id, {
+    await updateLink(link.id, {
       status: "paid",
       paidWithEth: false,
       payer: DEMO_MERCHANT,
@@ -273,7 +276,7 @@ app.post("/api/links/:id/simulate", ah(async (req, res) => {
 }));
 
 app.post("/api/links/:id/settle", ah(async (req, res) => {
-  const link = findLink(req.params.id);
+  const link = await findLink(req.params.id);
   if (!link) throw new HttpError(404, "Payment link not found.");
   const txHash = String(req.body?.txHash ?? "");
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new HttpError(400, "txHash is invalid.");
@@ -286,7 +289,7 @@ app.post("/api/links/:id/settle", ah(async (req, res) => {
       // A missing/pending receipt is a client-visible problem, not a server crash.
       throw new HttpError(400, e?.shortMessage ?? e?.message ?? "That transaction could not be verified.");
     }
-    updateLink(link.id, {
+    await updateLink(link.id, {
       status: "paid",
       txHash: txHash as Hex,
       payer: verified.payer,
@@ -298,7 +301,7 @@ app.post("/api/links/:id/settle", ah(async (req, res) => {
 }));
 
 app.patch("/api/links/:id", ah(async (req, res) => {
-  const link = findLink(req.params.id);
+  const link = await findLink(req.params.id);
   if (!link) throw new HttpError(404, "Payment link not found.");
   if (req.body?.status !== "cancelled") throw new HttpError(400, "Only cancellation is supported.");
   if (link.status === "paid") throw new HttpError(409, "A settled link cannot be cancelled.");
@@ -319,7 +322,7 @@ app.patch("/api/links/:id", ah(async (req, res) => {
   if (!ok || !isAddressEqual(getAddress(merchant), link.merchant)) {
     throw new HttpError(401, "Cancellation must be signed by the merchant wallet.");
   }
-  updateLink(link.id, { status: "cancelled" });
+  await updateLink(link.id, { status: "cancelled" });
   res.json({ link: view(link, publicBaseUrl(req)) });
 }));
 
