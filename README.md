@@ -10,6 +10,13 @@ or ETH via a Uniswap swap that delivers the exact signed USDC amount and refunds
 - `apps/mobile/`: Android app (Expo dev build; merchant + customer screens, NFC via HCE, QR fallback)
 - `web/`: browser demo that SIMULATES the flow (fake settlement address, random throwaway keys generated per page load). Not the real app.
 - `test-e2e/`: local end-to-end test (real contract + mock USDC/WETH/router on a local chain)
+- `payflux-customer-dashboard/`: React + Vite customer dashboard (mock data, no backend)
+- `payflux-merchant-dashboard/`: Express + Vite merchant admin app with Supabase backend
+
+## Branches
+- `main` — core monorepo (contracts, shared, mobile, web, test-e2e)
+- `customer-dashboard` — standalone customer dashboard (`payflux-customer-dashboard/`)
+- `merchant-dashboard` — core monorepo + merchant dashboard + customer dashboard
 
 ## Verified so far
 - `forge test` in `contracts/`: 5/5 pass (OpenZeppelin v5.1.0 is vendored in `contracts/lib`).
@@ -24,6 +31,14 @@ NOT run (needs your wallet / network / phones): Base Sepolia deploy, swap-pool l
 4. ENS (on **Ethereum Sepolia**, app.ens.domains): with a wallet that has free Sepolia ETH, register a name, point its address record to that same wallet, and set it as that wallet's primary name. Then on the merchant phone, open the Merchant screen and use "Use my own wallet" to import that wallet's private key (testnet-only wallet!). The merchant signer then equals the ENS owner, so verification passes.
 5. Fund the customer wallet with Base Sepolia ETH and test USDC (faucet.circle.com).
 6. `cd apps/mobile && npm i && npx expo prebuild && npx expo run:android` on both phones.
+
+## Customer dashboard (`payflux-customer-dashboard/`)
+```
+npm install
+npm run dev        # http://localhost:5173
+npm run build      # production build in dist/
+```
+Structure: `src/App.jsx` (state), `src/components/*` (one file per dashboard section), `src/data.js` (demo data), `src/index.css` (design tokens). Data is mock — replace `src/data.js` with API calls.
 
 ## Check before relying on it
 - The WETH/USDC 0.3% pool on Base Sepolia needs liquidity for the ETH path (otherwise change `POOL_FEE` and the deploy fee). USDC path is independent.
